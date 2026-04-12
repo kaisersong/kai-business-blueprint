@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from .export_drawio import export_drawio
+from .export_excalidraw import export_excalidraw
+from .export_svg import export_svg
+from .generate import write_plan_output
+from .model import load_json
+from .validate import validate_blueprint
+from .viewer import write_viewer_package
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="business-blueprint")
+    parser.add_argument("--plan", help="Generate only the canonical blueprint JSON.")
+    parser.add_argument(
+        "--generate",
+        help="Generate the canonical blueprint JSON and viewer.",
+    )
+    parser.add_argument("--edit", help="Refresh the static viewer for an existing blueprint.")
+    parser.add_argument("--export", help="Export SVG, draw.io, and Excalidraw artifacts.")
+    parser.add_argument("--validate", help="Validate a blueprint and print JSON results.")
+    parser.add_argument("--from", dest="from_path", help="Source text or file path.")
+    parser.add_argument("--industry", default="common", help="Template pack name.")
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.plan:
+        source_text = _read_source_text(args.from_path)
+        write_plan_output(Path(args.plan), source_text, args.industry, Path.cwd())
+        return 0
+
+    if args.generate:
+        blueprint_path = Path(args.from_path or "solution.blueprint.json")
+        viewer_path = Path(args.generate)
+        write_viewer_package(
+            blueprint_path=blueprint_path,
+            viewer_path=viewer_path,
+            handoff_path=viewer_path.with_name("solution.handoff.json"),
+            patch_path=viewer_path.with_name("solution.patch.jsonl"),
+        )
+        return 0
+
+    if args.edit:
+        blueprint_path = Path(args.edit)
+        viewer_path = blueprint_path.with_suffix(".viewer.html")
+        write_viewer_package(
+            blueprint_path=blueprint_path,
+            viewer_path=viewer_path,
+            handoff_path=blueprint_path.with_name("solution.handoff.json"),
+            patch_path=blueprint_path.with_name("solution.patch.jsonl"),
+        )
+        return 0
+
+    if args.export:
+        blueprint_path = Path(args.export)
+        blueprint = load_json(blueprint_path)
+        export_dir = blueprint_path.with_name("solution.exports")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_svg(blueprint, export_dir / "solution.svg")
+        export_drawio(blueprint, export_dir / "solution.drawio")
+        export_excalidraw(blueprint, export_dir / "solution.excalidraw")
+        return 0
+
+    if args.validate:
+        payload = load_json(Path(args.validate))
+        print(json.dumps(validate_blueprint(payload), ensure_ascii=False, indent=2))
+        return 0
+
+    return 0
+
+
+def _read_source_text(value: str | None) -> str:
+    if not value:
+        return ""
+    path = Path(value)
+    return path.read_text(encoding="utf-8") if path.exists() else value
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

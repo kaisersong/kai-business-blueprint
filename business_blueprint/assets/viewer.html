@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Business Blueprint Viewer</title>
+    <style>
+      :root {
+        --bg: #eef3f8;
+        --panel: #ffffff;
+        --ink: #162231;
+        --muted: #5a6b7f;
+        --line: #c8d6e4;
+        --accent: #0b5bd3;
+        --accent-soft: #d9e7ff;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Segoe UI", sans-serif; background: linear-gradient(180deg, #f7fbff 0%, var(--bg) 100%); color: var(--ink); }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 20px; background: #0f2742; color: #fff; }
+      main { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 72px); }
+      aside, section { padding: 20px; }
+      aside { background: rgba(255,255,255,.9); border-right: 1px solid var(--line); }
+      section { display: grid; gap: 16px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(14, 35, 60, 0.06); }
+      .badge { display: inline-block; padding: 4px 8px; background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 12px; font-weight: 600; }
+      .muted { color: var(--muted); }
+      input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; background: #fff; }
+      textarea { min-height: 240px; resize: vertical; }
+      button { border: none; border-radius: 10px; background: var(--accent); color: #fff; padding: 10px 14px; font: inherit; cursor: pointer; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      @media (max-width: 860px) {
+        main { grid-template-columns: 1fr; }
+        aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      const blueprint = __BLUEPRINT_JSON__;
+      let patchLog = [];
+
+      function updateSummary() {
+        document.getElementById("revision-id").textContent = blueprint.meta.revisionId || "unknown";
+        document.getElementById("dirty-state").textContent = patchLog.length ? "Unsaved edits" : "Saved";
+        document.getElementById("json-view").value = JSON.stringify(blueprint, null, 2);
+      }
+
+      function renameTitle() {
+        const nextValue = document.getElementById("title-input").value.trim();
+        blueprint.meta.title = nextValue || blueprint.meta.title || "Generated Blueprint";
+        blueprint.editor = blueprint.editor || {};
+        blueprint.editor.fieldLocks = blueprint.editor.fieldLocks || {};
+        blueprint.editor.fieldLocks["meta.title"] = "human";
+        patchLog.push({ op: "update_meta", fields: { title: blueprint.meta.title } });
+        updateSummary();
+      }
+
+      function exportRevision() {
+        const blob = new Blob([JSON.stringify(blueprint, null, 2)], { type: "application/json" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "solution.blueprint.json";
+        link.click();
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        document.getElementById("title-input").value = blueprint.meta.title || "";
+        document.getElementById("rename-button").addEventListener("click", renameTitle);
+        document.getElementById("save-button").addEventListener("click", exportRevision);
+        updateSummary();
+      });
+    </script>
+    <header>
+      <div>
+        <div class="badge">IR First Viewer</div>
+        <h1 style="margin:8px 0 0;font-size:22px;">Business Blueprint Workbench</h1>
+      </div>
+      <div class="muted">Revision: <strong id="revision-id">unknown</strong> · <span id="dirty-state">Saved</span></div>
+    </header>
+    <main>
+      <aside>
+        <div class="card">
+          <h2 style="margin-top:0;font-size:18px;">Light Edit</h2>
+          <p class="muted">Viewer edits are not the source of truth. Export a new canonical JSON revision.</p>
+          <label for="title-input">Title</label>
+          <input id="title-input" />
+          <div class="actions" style="margin-top:12px;">
+            <button id="rename-button" type="button">Apply Title</button>
+            <button id="save-button" type="button">Export Revision</button>
+          </div>
+        </div>
+      </aside>
+      <section>
+        <div class="card">
+          <h2 style="margin-top:0;font-size:18px;">Canonical JSON</h2>
+          <textarea id="json-view" readonly></textarea>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
