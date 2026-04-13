@@ -210,7 +210,7 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
     #   content_y  = header_y + LAYER_HEADER_H + LAYER_PAD
     #   border_h   = LAYER_HEADER_H + LAYER_PAD + content_h + LAYER_PAD
     #   next layer border_y = this border_y + border_h + LAYER_GAP
-    layer_y = CANVAS_PAD_TOP - LAYER_HEADER_H - LAYER_PAD  # 110 - 32 - 28 = 50
+    layer_y = 72  # below title block (y=10, h=52) + 10px gap
     layer_configs: list[dict] = []
 
     # ── Row 0: Systems ──
@@ -365,7 +365,7 @@ def _layer_svg(label: str, header_y: int, border_y: int, w: int, h: int) -> str:
 
 
 def _title_svg(title: str, subtitle: str, w: int) -> str:
-    ty = CANVAS_PAD_TOP - 62
+    ty = 10
     return (
         f'<g class="title-block">'
         f'<rect x="{CANVAS_X}" y="{ty}" width="{w}" height="52" '
