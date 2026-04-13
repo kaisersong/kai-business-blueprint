@@ -204,18 +204,18 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
     arrows_list: list[dict] = []
 
     # ── Vertical layout model ──
-    # For each layer:
-    #   header_y  = y position of the layer header bar
-    #   content_y = header_y + LAYER_HEADER_H + LAYER_PAD  (where nodes go)
-    #   border_y  = header_y - LAYER_PAD                    (border wraps header+content)
-    #   border_h  = LAYER_HEADER_H + LAYER_PAD*2 + content_h
-    # Layers spaced by LAYER_GAP between consecutive content areas
-    content_y = CANVAS_PAD_TOP  # first layer content starts here
-    header_y = content_y - LAYER_HEADER_H - LAYER_PAD
+    # Each layer from top to bottom:
+    #   border_y   = top of layer (same as header top)
+    #   header_y   = border_y  (header sits at border top, has its own bg)
+    #   content_y  = header_y + LAYER_HEADER_H + LAYER_PAD
+    #   border_h   = LAYER_HEADER_H + LAYER_PAD + content_h + LAYER_PAD
+    #   next layer border_y = this border_y + border_h + LAYER_GAP
+    layer_y = CANVAS_PAD_TOP - LAYER_HEADER_H - LAYER_PAD  # 110 - 32 - 28 = 50
     layer_configs: list[dict] = []
 
     # ── Row 0: Systems ──
     if systems:
+        content_y = layer_y + LAYER_HEADER_H + LAYER_PAD
         for col_idx, col in enumerate(ordered_columns):
             x = start_x + col_idx * (NODE_W + COL_GAP)
             if col["system"]:
@@ -226,17 +226,18 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
                         "kind": "system",
                         "label": sys_node.get("name", sys_node["id"]),
                     }
+        border_h = LAYER_HEADER_H + LAYER_PAD + NODE_H + LAYER_PAD
         layer_configs.append({
             "label": "Application Systems",
-            "header_y": header_y,
-            "content_h": NODE_H,
+            "header_y": layer_y,
+            "border_y": layer_y,
+            "border_h": border_h,
         })
-        # Next layer: advance by content_h + LAYER_GAP
-        content_y += NODE_H + LAYER_GAP
-        header_y = content_y - LAYER_HEADER_H - LAYER_PAD
+        layer_y = layer_y + border_h + LAYER_GAP
 
     # ── Row 1: Capabilities ──
     if capabilities:
+        content_y = layer_y + LAYER_HEADER_H + LAYER_PAD
         for col_idx, col in enumerate(ordered_columns):
             x = start_x + col_idx * (NODE_W + COL_GAP)
             for cid in col["caps"]:
@@ -247,33 +248,32 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
                         "kind": "capability",
                         "label": cap_node.get("name", cid),
                     }
-                    # Arrow: system → capability
                     sid = col["system"]
                     if sid and sid in nodes:
                         arrows_list.append({
                             "from": sid, "to": cid, "label": "supports", "dashed": False,
                         })
+        border_h = LAYER_HEADER_H + LAYER_PAD + NODE_H + LAYER_PAD
         layer_configs.append({
             "label": "Business Capabilities",
-            "header_y": header_y,
-            "content_h": NODE_H,
+            "header_y": layer_y,
+            "border_y": layer_y,
+            "border_h": border_h,
         })
-        content_y += NODE_H + LAYER_GAP
-        header_y = content_y - LAYER_HEADER_H - LAYER_PAD
+        layer_y = layer_y + border_h + LAYER_GAP
 
     # ── Row 2: Flow Steps ──
     if flow_steps:
         flow_nodes: list[dict] = list(flow_steps)
 
         col_flow_count: dict[int, int] = {}
-
-        # Place each flow step in the column of one of its capabilityIds
         cap_col_map: dict[str, int] = {}
         for col_idx, col in enumerate(ordered_columns):
             for cid in col["caps"]:
                 if cid:
                     cap_col_map[cid] = col_idx
 
+        content_y = layer_y + LAYER_HEADER_H + LAYER_PAD
         for i, fs in enumerate(flow_nodes):
             best_col = i % max(n_cols, 1)
             for cid in fs.get("capabilityIds", []):
@@ -289,7 +289,6 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
                 "kind": "flowStep",
                 "label": fs.get("name", fs["id"]),
             }
-            # Arrow: capability → flow
             for cid in fs.get("capabilityIds", []):
                 if cid in nodes:
                     arrows_list.append({
@@ -298,10 +297,12 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
 
         max_flow_rows = max(col_flow_count.values()) if col_flow_count else 1
         flow_content_h = max_flow_rows * NODE_H + max(0, max_flow_rows - 1) * 10
+        border_h = LAYER_HEADER_H + LAYER_PAD + flow_content_h + LAYER_PAD
         layer_configs.append({
             "label": "Process Flows",
-            "header_y": header_y,
-            "content_h": flow_content_h,
+            "header_y": layer_y,
+            "border_y": layer_y,
+            "border_h": border_h,
         })
 
     # ── Actors ──
@@ -319,13 +320,11 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
     # ── Build layer boxes from configs ──
     layers = []
     for lc in layer_configs:
-        hy = lc["header_y"]
-        ch = lc["content_h"]
         layers.append({
             "label": lc["label"],
-            "header_y": hy,
-            "y": hy - LAYER_PAD,
-            "h": LAYER_HEADER_H + LAYER_PAD * 2 + ch,
+            "header_y": lc["header_y"],
+            "y": lc["border_y"],
+            "h": lc["border_h"],
         })
 
     # Calculate height (add room for legend at bottom)
@@ -351,13 +350,13 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
 
 
 def _layer_svg(label: str, header_y: int, border_y: int, w: int, h: int) -> str:
-    """Layer container: header at header_y, border at border_y wrapping header+content."""
+    """Layer: border wraps header + content, header has its own bg color."""
     return (
         f'<g class="layer" id="layer-{_esc(label)}">'
-        f'<rect class="layer-header" x="{CANVAS_X}" y="{header_y}" width="{w}" height="{LAYER_HEADER_H}" '
-        f'rx="6" fill="{C["layer_header_bg"]}"/>'
         f'<rect class="layer-border" x="{CANVAS_X}" y="{border_y}" width="{w}" height="{h}" '
         f'rx="8" fill="none" stroke="{C["layer_border"]}" stroke-width="1"/>'
+        f'<rect class="layer-header" x="{CANVAS_X}" y="{header_y}" width="{w}" height="{LAYER_HEADER_H}" '
+        f'fill="{C["layer_header_bg"]}"/>'
         f'<text class="layer-label" x="{CANVAS_X + 16}" y="{header_y + LAYER_HEADER_H // 2 + 4}" '
         f'font-size="12" fill="{C["text_sub"]}" font-family="{FONT}" '
         f'font-weight="600" letter-spacing="0.4">{_esc(label)}</text>'
