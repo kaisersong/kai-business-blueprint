@@ -58,6 +58,62 @@ This skill produces **semantic intermediate artifacts**. Downstream skills consu
 - Other skills may consume `relations` → generate PlantUML or other diagram syntax
 - Downstream skills should **never directly edit** `solution.blueprint.json`
 
+## Sandbox Execution
+
+When running in an isolated Python sandbox (Jupyter, notebook, cloud REPL) that auto-installs dependencies:
+
+1. **The sandbox auto-installs `business-blueprint-skill` from PyPI.** Do NOT try to `pip install -e` or use `sys.path` hacks with `__file__` — `__file__` is undefined in Jupyter.
+
+2. **After auto-install, run code like this — copy exactly:**
+   ```python
+   from business_blueprint.cli import main
+   import sys
+   sys.argv = [
+       "business-blueprint",
+       "--plan",
+       "solution.blueprint.json",
+       "--from",
+       "your source text or requirements here",
+       "--industry",
+       "common"
+   ]
+   main()
+   ```
+
+3. **For `--generate` (after blueprint JSON exists):**
+   ```python
+   from pathlib import Path
+   from business_blueprint.generate import write_plan_output
+   source_text = "your source text"
+   output_path = Path("solution.blueprint.json")
+   write_plan_output(output_path, source_text, "common", Path.cwd())
+   ```
+
+4. **For `--export` (after blueprint JSON exists):**
+   ```python
+   from pathlib import Path
+   from business_blueprint.model import load_json
+   from business_blueprint.export_svg import export_svg
+   from business_blueprint.export_drawio import export_drawio
+   from business_blueprint.export_excalidraw import export_excalidraw
+   from business_blueprint.export_mermaid import export_mermaid
+
+   blueprint_path = Path("solution.blueprint.json")
+   blueprint = load_json(blueprint_path)
+   export_dir = blueprint_path.with_name("solution.exports")
+   export_dir.mkdir(parents=True, exist_ok=True)
+   export_svg(blueprint, export_dir / "solution.svg")
+   export_drawio(blueprint, export_dir / "solution.drawio")
+   export_excalidraw(blueprint, export_dir / "solution.excalidraw")
+   export_mermaid(blueprint, export_dir / "solution.mermaid.md")
+   ```
+
+5. **Prohibited patterns in sandbox:**
+   - `__file__` — undefined in Jupyter
+   - `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` — will raise NameError
+   - `subprocess.run(["business-blueprint", ...])` — sandbox runs Python cells, not shell
+   - `os.system()` — same reason
+
 ## Error Handling
 
 - If source text is too ambiguous to extract any entities: run `--plan` with minimal output, then surface `clarifyRequests`.
