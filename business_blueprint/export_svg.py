@@ -236,21 +236,28 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
         })
         layer_y = layer_y + LAYER_HEADER_H + LAYER_PAD + NODE_H + LAYER_PAD + LAYER_GAP
 
-    # ── Actors (always in first layer) ──
+    # ── Actors: always placed to the right in 2 columns ──
     if actors:
         first_meta = layer_metas[0] if layer_metas else None
         if first_meta:
             content_y = first_meta["content_y"]
-            x_actor = start_x + n_cols * (NODE_W + COL_GAP) + COL_GAP
-            y_actor = content_y
-            for a in actors:
+            actor_col_count = 2 if len(actors) > 4 else 1
+            actor_gap = 12
+            actor_w = NODE_W
+            total_actor_w = actor_col_count * actor_w + max(0, actor_col_count - 1) * actor_gap
+            x_actor_start = start_x + n_cols * (NODE_W + COL_GAP) + COL_GAP
+            y_actor_start = content_y
+
+            for ai, a in enumerate(actors):
+                col = ai // actor_col_count
+                row = ai % actor_col_count
                 nodes[a["id"]] = {
-                    "x": x_actor, "y": y_actor,
+                    "x": int(x_actor_start + row * (actor_w + actor_gap)),
+                    "y": y_actor_start + col * (NODE_H + 12),
                     "kind": "actor",
                     "label": a.get("name", a["id"]),
                 }
                 node_layer[a["id"]] = 0
-                y_actor += NODE_H + 12
 
     # ── Row 1: Capabilities ──
     if capabilities:
@@ -451,19 +458,6 @@ def _legend_svg(x: int, y: int) -> str:
     )
     parts.append('</g>')
     return "\n".join(parts)
-    ty = CANVAS_PAD_TOP - 62
-    return (
-        f'<g class="title-block">'
-        f'<rect x="{CANVAS_X}" y="{ty}" width="{w}" height="52" '
-        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
-        f'<text x="{CANVAS_X + 16}" y="{ty + 24}" '
-        f'font-size="16" fill="{C["text_main"]}" font-family="{FONT}" '
-        f'font-weight="700">{_esc(title)}</text>'
-        f'<text x="{CANVAS_X + 16}" y="{ty + 42}" '
-        f'font-size="11" fill="{C["text_sub"]}" font-family="{FONT_MONO}">'
-        f'{_esc(subtitle)}</text>'
-        f'</g>'
-    )
 
 
 # ─── SVG defs (markers) ──────────────────────────────────────────
@@ -542,6 +536,760 @@ def export_svg(blueprint: dict[str, Any], target: Path) -> None:
 
     # Legend (bottom-left, fireworks-tech-graph pattern)
     parts.append(_legend_svg(CANVAS_X + 10, h - 180 - 10))
+
+    parts.append("</svg>")
+    target.write_text("\n".join(parts), encoding="utf-8")
+
+
+# ─── Export: Product Tree / Genealogy ────────────────────────────
+def export_product_tree_svg(blueprint: dict[str, Any], target: Path) -> None:
+    """Product family tree: root → market segments → products with capability badges."""
+    title = blueprint.get("meta", {}).get("title", "Product Family")
+    lib = blueprint.get("library", {})
+    systems = lib.get("systems", [])
+    capabilities = lib.get("capabilities", [])
+    relations = blueprint.get("relations", [])
+
+    cap_by_id = {c["id"]: c for c in capabilities}
+    sys_by_id = {s["id"]: s for s in systems}
+
+    # Build evolution map: from_id → to_id
+    evolve_map: dict[str, list[str]] = {}
+    platform_powers: dict[str, list[str]] = {}
+    for r in relations:
+        if r["type"] == "powers":
+            platform_powers.setdefault(r["from"], []).append(r["to"])
+        elif r["type"] == "evolves-to" or r["label"] == "演进":
+            evolve_map.setdefault(r["from"], []).append(r["to"])
+
+    # Market segments — known system IDs for Kingdee products
+    segments = [
+        {"label": "PaaS平台", "ids": ["sys-cosmic"]},
+        {"label": "大型企业", "ids": ["sys-galaxy", "sys-eas", "sys-shr"]},
+        {"label": "中型企业", "ids": ["sys-cosmic-star"]},
+        {"label": "小型企业", "ids": ["sys-star"]},
+        {"label": "微小型", "ids": ["sys-jingdou", "sys-kis"]},
+    ]
+
+    # Filter to actual systems
+    active_segments: list[dict] = []
+    for seg in segments:
+        matched = [s for s in systems if s["id"] in seg["ids"]]
+        if matched:
+            active_segments.append({"label": seg["label"], "sys_ids": [s["id"] for s in matched]})
+
+    # Fallback
+    if not active_segments and systems:
+        active_segments = [{"label": "Products", "sys_ids": [s["id"] for s in systems]}]
+
+    PAD_X = 50
+    PAD_Y = 30
+    NODE_H = 44
+    CAP_H = 20
+    COL_W = 220
+    SEG_GAP = 16  # gap between segment group boxes
+    SEG_INNER_PAD = 18  # inside group box
+    ROOT_W = 160
+    ROOT_H = 44
+
+    # Color palette per segment
+    seg_colors = {
+        "PaaS平台": ("#4338CA", "#EEF2FF"),
+        "大型企业": ("#0B6E6E", "#E8F5F5"),
+        "中型企业": ("#0F7B6C", "#E8F5F5"),
+        "小型企业": ("#059669", "#ECFDF5"),
+        "微小型": ("#D97706", "#FEFCE8"),
+    }
+
+    # Pass 1: compute layout
+    max_cols = 0
+    total_seg_h = 0
+    seg_layouts: list[dict] = []
+    for seg in active_segments:
+        n_cols = len(seg["sys_ids"])
+        max_cols = max(max_cols, n_cols)
+        # Compute max badge count across systems in this segment
+        max_badges = 0
+        for sid in seg["sys_ids"]:
+            sys = sys_by_id.get(sid)
+            if sys:
+                max_badges = max(max_badges, len(sys.get("capabilityIds", [])))
+        # Segment group height = label + pad + node row + badges
+        seg_h = 24 + SEG_INNER_PAD + NODE_H + max(0, max_badges) * (CAP_H + 4) + 4
+        total_seg_h += seg_h + SEG_GAP
+        seg_layouts.append({"label": seg["label"], "sys_ids": seg["sys_ids"], "h": seg_h})
+
+    canvas_w = PAD_X * 2 + max_cols * COL_W + (max_cols - 1) * 20
+    root_y = PAD_Y + 92
+    seg_y = root_y + ROOT_H + SEG_GAP + 30  # arrow space + gap
+
+    parts: list[str] = []  # will prepend svg header after layout
+
+    # Title block
+    parts.append(
+        f'<g class="title-block">'
+        f'<rect x="{PAD_X}" y="{PAD_Y}" width="{canvas_w - PAD_X * 2}" height="52" '
+        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" '
+        f'font-size="16" fill="{C["text_main"]}" font-family="{FONT}" '
+        f'font-weight="700">{_esc(title)} — 产品谱系</text>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" '
+        f'font-size="11" fill="{C["text_sub"]}" font-family="{FONT_MONO}">'
+        f'Kingdee Product Family</text></g>'
+    )
+
+    cx = canvas_w / 2
+
+    # Root node
+    parts.append(
+        f'<rect class="node-rect" x="{cx - ROOT_W / 2}" y="{root_y}" width="{ROOT_W}" height="{ROOT_H}" '
+        f'rx="8" fill="#1E293B" stroke="#0F172A" stroke-width="1.5"/>'
+        f'<text class="node-label" x="{cx}" y="{root_y + ROOT_H / 2 + 5}" '
+        f'text-anchor="middle" font-size="15" fill="#FFFFFF" '
+        f'font-weight="700">金蝶 Kingdee</text>'
+    )
+
+    node_positions: dict[str, tuple[int, int]] = {}
+    seg_top_y: dict[str, int] = {}  # for arrows
+
+    current_y = seg_y
+    for sl in seg_layouts:
+        seg_label = sl["label"]
+        stroke, fill = seg_colors.get(seg_label, ("#64748B", "#F8FAFC"))
+        sys_ids = sl["sys_ids"]
+        n = len(sys_ids)
+        seg_w = n * COL_W + max(0, n - 1) * 20
+        seg_start_x = cx - seg_w / 2
+
+        seg_top_y[seg_label] = current_y
+
+        # Segment group bg
+        parts.append(
+            f'<rect x="{seg_start_x - SEG_INNER_PAD}" y="{current_y}" '
+            f'width="{seg_w + SEG_INNER_PAD * 2}" height="{sl["h"]}" '
+            f'rx="10" fill="{fill}" stroke="{stroke}" stroke-width="1" opacity="0.6"/>'
+        )
+        # Segment label
+        parts.append(
+            f'<text x="{cx}" y="{current_y + 16}" text-anchor="middle" '
+            f'font-size="11" fill="{stroke}" font-weight="600" letter-spacing="0.5">'
+            f'{_esc(seg_label)}</text>'
+        )
+
+        ny = current_y + 28
+        for ci, sid in enumerate(sys_ids):
+            sys = sys_by_id.get(sid)
+            if not sys:
+                continue
+            nx = int(seg_start_x + ci * (COL_W + 20))
+            node_positions[sid] = (nx + COL_W // 2, ny + NODE_H // 2)
+
+            parts.append(
+                f'<rect class="node-rect" x="{nx}" y="{ny}" width="{COL_W}" height="{NODE_H}" '
+                f'rx="6" fill="{C["canvas"]}" stroke="{stroke}" stroke-width="1.5"/>'
+                f'<text class="node-label" x="{nx + COL_W // 2}" y="{ny + NODE_H // 2 + 5}" '
+                f'text-anchor="middle" font-size="12" fill="{C["text_main"]}" '
+                f'font-weight="600">{_esc(sys["name"])}</text>'
+            )
+
+            # Capability badges
+            cap_ids = sys.get("capabilityIds", [])
+            badge_y = ny + NODE_H + 6
+            for j, cid in enumerate(cap_ids[:4]):
+                cap = cap_by_id.get(cid, {})
+                cap_name = cap.get("name", cid)
+                bw = max(len(cap_name) * 7 + 12, 50)
+                bx = nx + COL_W // 2 - bw // 2
+                parts.append(
+                    f'<rect x="{bx}" y="{badge_y + j * (CAP_H + 4)}" width="{bw}" height="{CAP_H}" '
+                    f'rx="3" fill="{stroke}" opacity="0.15"/>'
+                    f'<text x="{bx + bw // 2}" y="{badge_y + j * (CAP_H + 4) + CAP_H // 2 + 5}" '
+                    f'text-anchor="middle" font-size="9" fill="{stroke}">{_esc(cap_name)}</text>'
+                )
+
+        current_y += sl["h"] + SEG_GAP
+
+    canvas_h = current_y + PAD_Y  # bottom padding after last segment
+
+    # Prepend SVG header
+    header = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" '
+        f'font-family="{FONT}">',
+        _svg_defs(),
+        f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>',
+    ]
+    parts[0:0] = header
+
+    # Arrows: root to each segment group
+    for seg in active_segments:
+        ry2 = seg_top_y[seg["label"]] + 14
+        parts.append(
+            f'<line x1="{cx}" y1="{root_y + ROOT_H}" x2="{cx}" y2="{ry2}" '
+            f'stroke="{C["arrow_muted"]}" stroke-width="1" stroke-dasharray="4,3" '
+            f'marker-end="url(#arrow-dashed)"/>'
+        )
+
+    # Evolution arrows (EAS → 星瀚, etc.)
+    for from_id, to_ids in evolve_map.items():
+        for to_id in to_ids:
+            if from_id in node_positions and to_id in node_positions:
+                fx, fy = node_positions[from_id]
+                tx, ty = node_positions[to_id]
+                if abs(tx - fx) > 30:  # not in same column
+                    dy = (fy + ty) / 2
+                    parts.append(
+                        f'<path d="M{fx},{fy} C{fx},{dy} {tx},{dy} {tx},{ty}" '
+                        f'fill="none" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="6,3" '
+                        f'marker-end="url(#arrow-dashed)" opacity="0.6"/>'
+                    )
+                    # Label
+                    mx, my = (fx + tx) // 2, dy
+                    parts.append(
+                        f'<rect x="{mx - 22}" y="{my - 8}" width="44" height="16" '
+                        f'rx="3" fill="{C["arrow_label_bg"]}"/>'
+                        f'<text x="{mx}" y="{my + 4}" text-anchor="middle" '
+                        f'font-size="9" fill="#DC2626" font-weight="500">演进</text>'
+                    )
+
+    # Platform arrows (苍穹 → 星瀚)
+    for plat_id, targets in platform_powers.items():
+        if plat_id in node_positions:
+            px, py = node_positions[plat_id]
+            for tgt_id in targets:
+                if tgt_id in node_positions:
+                    tx, ty = node_positions[tgt_id]
+                    dy = (py + ty) / 2
+                    parts.append(
+                        f'<path d="M{px},{py + 22} C{px},{dy} {tx},{dy} {tx},{ty - 22}" '
+                        f'fill="none" stroke="#4338CA" stroke-width="2" '
+                        f'marker-end="url(#arrow-solid)" opacity="0.7"/>'
+                    )
+                    mx = (px + tx) // 2
+                    my = dy
+                    parts.append(
+                        f'<rect x="{mx - 22}" y="{my - 8}" width="44" height="16" '
+                        f'rx="3" fill="{C["arrow_label_bg"]}"/>'
+                        f'<text x="{mx}" y="{my + 4}" text-anchor="middle" '
+                        f'font-size="9" fill="#4338CA" font-weight="500">支撑</text>'
+                    )
+
+    parts.append("</svg>")
+    target.write_text("\n".join(parts), encoding="utf-8")
+
+
+# ─── Export: Capability Matrix ───────────────────────────────────
+def export_matrix_svg(blueprint: dict[str, Any], target: Path) -> None:
+    """Matrix view: products as rows, capabilities as columns, coverage as cells."""
+    title = blueprint.get("meta", {}).get("title", "Product Family")
+    lib = blueprint.get("library", {})
+    systems = lib.get("systems", [])
+    capabilities = lib.get("capabilities", [])
+
+    # Market segments for row grouping
+    segments = [
+        {"label": "PaaS平台", "ids": ["sys-cosmic"]},
+        {"label": "大型企业", "ids": ["sys-galaxy", "sys-eas", "sys-shr"]},
+        {"label": "中型企业", "ids": ["sys-cosmic-star"]},
+        {"label": "小型企业", "ids": ["sys-star"]},
+        {"label": "微小型", "ids": ["sys-jingdou", "sys-kis"]},
+    ]
+
+    cap_by_id = {c["id"]: c for c in capabilities}
+    sys_by_id = {s["id"]: s for s in systems}
+    cap_ids = [c["id"] for c in capabilities]
+    n_cols = len(cap_ids)
+
+    # Build ordered product list grouped by segment
+    ordered_products: list[tuple[str, str | None]] = []
+    for seg in segments:
+        for sid in seg["ids"]:
+            if sid in sys_by_id:
+                ordered_products.append((sid, seg["label"]))
+    # Fallback: all systems in one group
+    if not ordered_products and systems:
+        ordered_products = [(s["id"], None) for s in systems]
+
+    PAD_X = 40
+    PAD_Y = 30
+    SEG_LABEL_W = 80
+    PROD_NAME_W = 110
+    CAP_COL_W = 100
+    ROW_H = 40
+    HEADER_H = 44
+    ROW_GAP = 1
+    n_rows = len(ordered_products)
+
+    canvas_w = PAD_X * 2 + SEG_LABEL_W + PROD_NAME_W + n_cols * CAP_COL_W
+    canvas_h = PAD_Y * 2 + HEADER_H + n_rows * ROW_H + (n_rows - 1) * ROW_GAP + 80
+
+    seg_colors = {
+        "PaaS平台": "#4338CA",
+        "大型企业": "#0B6E6E",
+        "中型企业": "#0F7B6C",
+        "小型企业": "#059669",
+        "微小型": "#D97706",
+    }
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" '
+        f'font-family="{FONT}">',
+        _svg_defs(),
+        f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>',
+    ]
+
+    # Title
+    parts.append(
+        f'<g class="title-block">'
+        f'<rect x="{PAD_X}" y="{PAD_Y}" width="{canvas_w - PAD_X * 2}" height="52" '
+        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" '
+        f'font-size="16" fill="{C["text_main"]}" font-family="{FONT}" '
+        f'font-weight="700">{_esc(title)} — 能力矩阵</text>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" '
+        f'font-size="11" fill="{C["text_sub"]}" font-family="{FONT_MONO}">'
+        f'Capability Coverage Matrix</text></g>'
+    )
+
+    base_y = PAD_Y + 100
+    left_w = SEG_LABEL_W + PROD_NAME_W
+
+    # Header row
+    parts.append(
+        f'<rect x="{PAD_X}" y="{base_y}" width="{left_w}" height="{HEADER_H}" '
+        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
+    )
+    parts.append(
+        f'<text x="{PAD_X + left_w // 2}" y="{base_y + HEADER_H // 2 + 5}" '
+        f'text-anchor="middle" font-size="13" fill="{C["text_main"]}" '
+        f'font-weight="600">产品 / 能力</text>'
+    )
+
+    for ci, cid in enumerate(cap_ids):
+        cap = cap_by_id[cid]
+        cx = PAD_X + left_w + ci * CAP_COL_W
+        parts.append(
+            f'<rect x="{cx}" y="{base_y}" width="{CAP_COL_W}" height="{HEADER_H}" '
+            f'rx="0" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
+            f'<text x="{cx + CAP_COL_W // 2}" y="{base_y + HEADER_H // 2 + 5}" '
+            f'text-anchor="middle" font-size="11" fill="{C["text_main"]}" '
+            f'font-weight="500">{_esc(cap["name"])}</text>'
+        )
+
+    # Data rows
+    prev_seg: str | None = None
+    for ri, (sid, seg_label) in enumerate(ordered_products):
+        sys = sys_by_id[sid]
+        row_y = base_y + HEADER_H + ri * (ROW_H + ROW_GAP)
+        sys_cap_ids = set(sys.get("capabilityIds", []))
+
+        stroke = seg_colors.get(seg_label or "", "#64748B")
+
+        # Row bg
+        parts.append(
+            f'<rect x="{PAD_X}" y="{row_y}" width="{canvas_w - PAD_X * 2}" height="{ROW_H}" '
+            f'rx="0" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="0.5"/>'
+        )
+
+        # Segment label (first row of each group)
+        if seg_label != prev_seg:
+            parts.append(
+                f'<text x="{PAD_X + 8}" y="{row_y + ROW_H // 2 + 5}" '
+                f'font-size="10" fill="{stroke}" font-weight="600" '
+                f'transform="rotate(-45, {PAD_X + 8}, {row_y + ROW_H // 2 + 5})">'
+                f'{_esc(seg_label or "")}</text>'
+            )
+            prev_seg = seg_label
+
+        # Product name
+        parts.append(
+            f'<text x="{PAD_X + SEG_LABEL_W + 8}" y="{row_y + ROW_H // 2 + 5}" '
+            f'font-size="12" fill="{C["text_main"]}" font-weight="500">'
+            f'{_esc(sys["name"])}</text>'
+        )
+
+        # Capability cells
+        for ci, cid in enumerate(cap_ids):
+            cx = PAD_X + left_w + ci * CAP_COL_W
+            if cid in sys_cap_ids:
+                parts.append(
+                    f'<rect x="{cx + 2}" y="{row_y + 2}" width="{CAP_COL_W - 4}" height="{ROW_H - 4}" '
+                    f'rx="4" fill="{stroke}" opacity="0.2"/>'
+                    f'<text x="{cx + CAP_COL_W // 2}" y="{row_y + ROW_H // 2 + 5}" '
+                    f'text-anchor="middle" font-size="14" fill="{stroke}">✓</text>'
+                )
+            else:
+                parts.append(
+                    f'<text x="{cx + CAP_COL_W // 2}" y="{row_y + ROW_H // 2 + 5}" '
+                    f'text-anchor="middle" font-size="14" fill="#E2E8F0">—</text>'
+                )
+
+    # Legend
+    legend_y = base_y + HEADER_H + n_rows * (ROW_H + ROW_GAP) + 30
+    parts.append(
+        f'<text x="{PAD_X}" y="{legend_y}" font-size="10" fill="{C["text_sub"]}">'
+        f'■ 覆盖  — 未覆盖  | 颜色 = 市场分层</text>'
+    )
+
+    parts.append("</svg>")
+    target.write_text("\n".join(parts), encoding="utf-8")
+
+
+# ─── Export: Capability Map ──────────────────────────────────────
+def export_capability_map_svg(blueprint: dict[str, Any], target: Path) -> None:
+    """Capability map: grouped cards showing business capabilities and their supporting systems."""
+    title = blueprint.get("meta", {}).get("title", "Business Blueprint")
+    industry = blueprint.get("meta", {}).get("industry", "")
+    lib = blueprint.get("library", {})
+    capabilities = lib.get("capabilities", [])
+    systems = lib.get("systems", [])
+    actors = lib.get("actors", [])
+
+    sys_by_id = {s["id"]: s for s in systems}
+    actor_by_id = {a["id"]: a for a in actors}
+
+    PAD_X = 50
+    PAD_Y = 30
+    CARD_W = 200
+    CARD_H = 80
+    CARD_GAP = 16
+    COLS = 3
+    COL_W = CARD_W + CARD_GAP
+
+    canvas_w = PAD_X * 2 + COLS * COL_W - CARD_GAP
+
+    parts: list[str] = []
+
+    # Title block
+    subtitle = f"Industry: {industry}" if industry else "Capability Map"
+    parts.extend([
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="0" '
+        f'font-family="{FONT}">',
+        _svg_defs(),
+        f'<rect width="{canvas_w}" height="0" fill="{C["bg"]}"/>',
+    ])
+
+    parts.append(
+        f'<g class="title-block">'
+        f'<rect x="{PAD_X}" y="{PAD_Y}" width="{canvas_w - PAD_X * 2}" height="52" '
+        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" '
+        f'font-size="16" fill="{C["text_main"]}" font-family="{FONT}" '
+        f'font-weight="700">{_esc(title)} — 能力地图</text>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" '
+        f'font-size="11" fill="{C["text_sub"]}" font-family="{FONT_MONO}">'
+        f'{_esc(subtitle)}</text></g>'
+    )
+
+    # Color palette for capability levels
+    level_colors = {
+        0: ("#1E293B", "#F1F5F9"),
+        1: ("#0B6E6E", "#E8F5F5"),
+        2: ("#059669", "#ECFDF5"),
+    }
+
+    # Group capabilities by level
+    by_level: dict[int, list[dict]] = {}
+    for cap in capabilities:
+        lvl = cap.get("level", 1)
+        by_level.setdefault(lvl, []).append(cap)
+
+    current_y = PAD_Y + 72
+    canvas_h = current_y
+
+    level_labels = {0: "战略层", 1: "核心层", 2: "支撑层"}
+
+    for lvl in sorted(by_level.keys()):
+        caps = by_level[lvl]
+        stroke, fill = level_colors.get(lvl, ("#64748B", "#F8FAFC"))
+        level_label = level_labels.get(lvl, f"L{lvl}")
+
+        # Level header
+        parts.append(
+            f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{stroke}" '
+            f'font-weight="700" font-family="{FONT}">{level_label} ({len(caps)})</text>'
+        )
+        current_y += 14
+
+        # Cards in grid
+        n = len(caps)
+        n_rows = math.ceil(n / COLS) if COLS > 0 else n
+        card_block_h = n_rows * CARD_H + max(0, n_rows - 1) * CARD_GAP
+
+        for i, cap in enumerate(caps):
+            col = i % COLS
+            row = i // COLS
+            cx = PAD_X + col * COL_W
+            cy = current_y + row * (CARD_H + CARD_GAP)
+
+            sys_names = []
+            for sid in cap.get("supportingSystemIds", []):
+                s = sys_by_id.get(sid)
+                if s:
+                    sys_names.append(s["name"])
+
+            parts.append(
+                f'<rect x="{cx}" y="{cy}" width="{CARD_W}" height="{CARD_H}" '
+                f'rx="6" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>'
+                f'<text x="{cx + 12}" y="{cy + 20}" font-size="12" fill="{stroke}" '
+                f'font-weight="600">{_esc(cap["name"])}</text>'
+            )
+
+            # Description (truncated)
+            desc = cap.get("description", "")[:40]
+            if desc:
+                parts.append(
+                    f'<text x="{cx + 12}" y="{cy + 36}" font-size="9" fill="{C["text_sub"]}">'
+                    f'{_esc(desc)}</text>'
+                )
+
+            # Supporting systems
+            for j, sname in enumerate(sys_names[:3]):
+                parts.append(
+                    f'<rect x="{cx + 12}" y="{cy + 46 + j * 16}" width="{CARD_W - 24}" height="14" '
+                    f'rx="3" fill="{C["canvas"]}"/>'
+                    f'<text x="{cx + 18}" y="{cy + 57 + j * 16}" font-size="8.5" fill="{C["text_main"]}">'
+                    f'{_esc(sname)}</text>'
+                )
+
+        current_y += card_block_h + 24
+        canvas_h = current_y
+
+    canvas_h += PAD_Y
+    # Fix SVG header with computed height
+    parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
+    parts[2] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>'
+
+    parts.append("</svg>")
+    target.write_text("\n".join(parts), encoding="utf-8")
+
+
+# ─── Export: Swimlane Flow ───────────────────────────────────────
+def export_swimlane_flow_svg(blueprint: dict[str, Any], target: Path) -> None:
+    """Swimlane flow diagram: actors as lanes, flow steps as connected cards."""
+    title = blueprint.get("meta", {}).get("title", "Business Blueprint")
+    industry = blueprint.get("meta", {}).get("industry", "")
+    lib = blueprint.get("library", {})
+    actors = lib.get("actors", [])
+    flow_steps = lib.get("flowSteps", [])
+    capabilities = lib.get("capabilities", [])
+
+    cap_by_id = {c["id"]: c for c in capabilities}
+    actor_by_id = {a["id"]: a for a in actors}
+
+    PAD_X = 50
+    PAD_Y = 30
+    LANE_HEADER_H = 36
+    LANE_GAP = 16
+    STEP_W = 160
+    STEP_H = 40
+    STEP_GAP = 14
+    ARROW_GAP = 12
+
+    # Group flow steps by actor
+    steps_by_actor: dict[str, list[dict]] = {}
+    for step in flow_steps:
+        aid = step.get("actorId", "")
+        steps_by_actor.setdefault(aid, []).append(step)
+
+    actor_order: list[str] = [a["id"] for a in actors]
+
+    canvas_w = 900
+    content_w = canvas_w - PAD_X * 2
+
+    parts: list[str] = []
+
+    subtitle = f"Industry: {industry}" if industry else "Swimlane Flow"
+    parts.extend([
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="0" '
+        f'font-family="{FONT}">',
+        _svg_defs(),
+        f'<rect width="{canvas_w}" height="0" fill="{C["bg"]}"/>',
+    ])
+
+    parts.append(
+        f'<g class="title-block">'
+        f'<rect x="{PAD_X}" y="{PAD_Y}" width="{content_w}" height="52" '
+        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" '
+        f'font-size="16" fill="{C["text_main"]}" font-family="{FONT}" '
+        f'font-weight="700">{_esc(title)} — 泳道流程</text>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" '
+        f'font-size="11" fill="{C["text_sub"]}" font-family="{FONT_MONO}">'
+        f'{_esc(subtitle)}</text></g>'
+    )
+
+    lane_palette = [
+        ("#0B6E6E", "#E8F5F5"),
+        ("#059669", "#ECFDF5"),
+        ("#4338CA", "#EEF2FF"),
+        ("#D97706", "#FEFCE8"),
+        ("#DC2626", "#FEF2F2"),
+        ("#7C3AED", "#F5F3FF"),
+        ("#0891B2", "#ECFEFF"),
+        ("#65A30D", "#F7FEE7"),
+        ("#C2410C", "#FFF7ED"),
+        ("#475569", "#F8FAFC"),
+        ("#9333EA", "#FAF5FF"),
+    ]
+
+    # First pass: compute lane heights and step positions for arrow drawing
+    lane_positions: dict[str, dict] = {}  # actor_id → {"y": top_y, "steps": {step_id: (cx, cy)}}
+    current_y = PAD_Y + 72
+
+    for lane_idx, actor_id in enumerate(actor_order):
+        actor = actor_by_id.get(actor_id)
+        if not actor:
+            continue
+        stroke, fill = lane_palette[lane_idx % len(lane_palette)]
+        steps = steps_by_actor.get(actor_id, [])
+        lane_h = LANE_HEADER_H + LANE_GAP + len(steps) * (STEP_H + STEP_GAP) + LANE_GAP
+
+        lane_positions[actor_id] = {
+            "y": current_y,
+            "h": lane_h,
+            "stroke": stroke,
+            "fill": fill,
+            "steps": {},
+        }
+
+        step_y = current_y + LANE_HEADER_H + LANE_GAP
+        for si, step in enumerate(steps):
+            cx = PAD_X + 14 + STEP_W // 2
+            cy = step_y + si * (STEP_H + STEP_GAP) + STEP_H // 2
+            lane_positions[actor_id]["steps"][step["id"]] = (cx, cy)
+
+        current_y += lane_h + LANE_GAP
+
+    # Arrows layer (drawn before cards)
+    arrow_parts: list[str] = []
+    # Intra-lane arrows (sequential flow within same actor)
+    for actor_id, steps in steps_by_actor.items():
+        pos_data = lane_positions.get(actor_id)
+        if not pos_data:
+            continue
+        stroke = pos_data["stroke"]
+        for i in range(len(steps) - 1):
+            _, from_cy = pos_data["steps"][steps[i]["id"]]
+            to_cx, to_cy = pos_data["steps"][steps[i + 1]["id"]]
+            from_y = from_cy + STEP_H // 2 + 4
+            to_y = to_cy - STEP_H // 2 - 2
+
+            if from_y < to_y:
+                mid_y = (from_y + to_y) / 2
+                arrow_parts.append(
+                    f'<path d="M{PAD_X + 14 + STEP_W // 2},{from_y} '
+                    f'C{PAD_X + 14 + STEP_W // 2},{mid_y} {to_cx},{mid_y} {to_cx},{to_y}" '
+                    f'fill="none" stroke="{stroke}" stroke-width="1.5" opacity="0.4" '
+                    f'marker-end="url(#arrow-solid)"/>'
+                )
+
+    # Cross-lane arrows: capability overlap implies connection
+    for i, aid1 in enumerate(steps_by_actor):
+        for j, aid2 in enumerate(steps_by_actor):
+            if j <= i:
+                continue
+            p1 = lane_positions.get(aid1)
+            p2 = lane_positions.get(aid2)
+            if not p1 or not p2:
+                continue
+            s1 = steps_by_actor[aid1]
+            s2 = steps_by_actor[aid2]
+            # Connect first step of each lane
+            if s1 and s2 and s1[0]["id"] in p1["steps"] and s2[0]["id"] in p2["steps"]:
+                _, cy1 = p1["steps"][s1[0]["id"]]
+                _, cy2 = p2["steps"][s2[0]["id"]]
+                x1 = PAD_X + 14 + STEP_W + 4
+                x2 = PAD_X + 14 + STEP_W + 4
+                my = (cy1 + cy2) / 2
+                arrow_parts.append(
+                    f'<path d="M{x1},{cy1} C{x1 + 30},{my} {x2 + 30},{my} {x2},{cy2}" '
+                    f'fill="none" stroke="#94A3B8" stroke-width="1" stroke-dasharray="4,3" opacity="0.3" '
+                    f'marker-end="url(#arrow-dashed)"/>'
+                )
+
+    # Second pass: render lanes and cards
+    current_y = PAD_Y + 72
+    for lane_idx, actor_id in enumerate(actor_order):
+        actor = actor_by_id.get(actor_id)
+        if not actor:
+            continue
+        stroke, fill = lane_palette[lane_idx % len(lane_palette)]
+
+        steps = steps_by_actor.get(actor_id, [])
+        lane_h = LANE_HEADER_H + LANE_GAP + len(steps) * (STEP_H + STEP_GAP) + LANE_GAP
+
+        # Lane background
+        parts.append(
+            f'<rect x="{PAD_X}" y="{current_y}" width="{content_w}" height="{lane_h}" '
+            f'rx="6" fill="{fill}" stroke="{stroke}" stroke-width="0.5" opacity="0.5"/>'
+        )
+        # Lane label with step count
+        parts.append(
+            f'<text x="{PAD_X + 14}" y="{current_y + LANE_HEADER_H // 2 + 5}" '
+            f'font-size="12" fill="{stroke}" font-weight="600">{_esc(actor["name"])} '
+            f'<tspan font-size="10" fill="{C["text_sub"]}">({len(steps)}步)</tspan></text>'
+        )
+        # Right side: capability tags summary
+        all_caps = set()
+        for s in steps:
+            for cid in s.get("capabilityIds", []):
+                all_caps.add(cid)
+        cap_x = PAD_X + content_w - 14
+        for ci, cid in enumerate(list(all_caps)[:4]):
+            cap = cap_by_id.get(cid, {})
+            tag_w = len(cap.get("name", "")) * 7 + 10
+            tx = cap_x - ci * (tag_w + 4) - tag_w
+            parts.append(
+                f'<rect x="{tx}" y="{current_y + 8}" width="{tag_w}" height="18" '
+                f'rx="3" fill="{stroke}" opacity="0.15"/>'
+                f'<text x="{tx + tag_w // 2}" y="{current_y + 21}" '
+                f'text-anchor="middle" font-size="8" fill="{stroke}">'
+                f'{_esc(cap.get("name", ""))}</text>'
+            )
+
+        step_y = current_y + LANE_HEADER_H + LANE_GAP
+        for si, step in enumerate(steps):
+            sx = PAD_X + 14
+            sy = step_y + si * (STEP_H + STEP_GAP)
+
+            # Step number badge
+            step_num = si + 1
+            parts.append(
+                f'<rect x="{sx}" y="{sy}" width="{STEP_W}" height="{STEP_H}" '
+                f'rx="5" fill="{C["canvas"]}" stroke="{stroke}" stroke-width="1.5"/>'
+                f'<rect x="{sx + 2}" y="{sy + 2}" width="22" height="{STEP_H - 4}" '
+                f'rx="4" fill="{stroke}" opacity="0.12"/>'
+                f'<text x="{sx + 13}" y="{sy + STEP_H // 2 + 5}" '
+                f'text-anchor="middle" font-size="12" fill="{stroke}" font-weight="700">{step_num}</text>'
+                f'<text x="{sx + 32}" y="{sy + STEP_H // 2 + 5}" '
+                f'font-size="11" fill="{C["text_main"]}" font-weight="500">'
+                f'{_esc(step["name"])}</text>'
+            )
+
+            # Capability tags
+            cap_ids = step.get("capabilityIds", [])
+            for j, cid in enumerate(cap_ids[:2]):
+                cap = cap_by_id.get(cid, {})
+                tag_x = sx + STEP_W + 8 + j * 80
+                cap_name = cap.get("name", "")
+                if cap_name:
+                    tw = len(cap_name) * 7 + 10
+                    parts.append(
+                        f'<rect x="{tag_x}" y="{sy + 10}" width="{tw}" height="18" '
+                        f'rx="3" fill="{stroke}" opacity="0.15"/>'
+                        f'<text x="{tag_x + tw // 2}" y="{sy + 23}" '
+                        f'text-anchor="middle" font-size="8" fill="{stroke}">'
+                        f'{_esc(cap_name)}</text>'
+                    )
+
+        current_y += lane_h + LANE_GAP
+
+    # Insert arrows before the card elements
+    parts[3:3] = arrow_parts
+
+    canvas_h = current_y + PAD_Y
+    parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
+    parts[2] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>'
 
     parts.append("</svg>")
     target.write_text("\n".join(parts), encoding="utf-8")

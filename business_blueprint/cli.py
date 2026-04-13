@@ -7,7 +7,7 @@ from pathlib import Path
 from .export_drawio import export_drawio
 from .export_excalidraw import export_excalidraw
 from .export_mermaid import export_mermaid
-from .export_svg import export_svg
+from .export_svg import export_svg, export_product_tree_svg, export_matrix_svg, export_capability_map_svg, export_swimlane_flow_svg
 from .generate import write_plan_output
 from .model import load_json
 from .validate import validate_blueprint
@@ -66,6 +66,10 @@ def main() -> int:
         export_dir = blueprint_path.with_name("solution.exports")
         export_dir.mkdir(parents=True, exist_ok=True)
         export_svg(blueprint, export_dir / "solution.svg")
+        export_capability_map_svg(blueprint, export_dir / "capability-map.svg")
+        export_swimlane_flow_svg(blueprint, export_dir / "swimlane-flow.svg")
+        export_product_tree_svg(blueprint, export_dir / "product-tree.svg")
+        export_matrix_svg(blueprint, export_dir / "capability-matrix.svg")
         export_drawio(blueprint, export_dir / "solution.drawio")
         export_excalidraw(blueprint, export_dir / "solution.excalidraw")
         export_mermaid(blueprint, export_dir / "solution.mermaid.md")

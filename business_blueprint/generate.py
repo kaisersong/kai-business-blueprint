@@ -9,6 +9,40 @@ from .model import load_json, new_revision_meta, write_json
 from .normalize import merge_or_create_system
 
 
+# ─── Flow sequence definitions: ordered steps within named processes ───
+# Each entry: (process_name, [step_trigger_keywords_in_order])
+FLOW_SEQUENCES: tuple[tuple[str, list[tuple[str, str]]], ...] = (
+    # Membership lifecycle
+    ("会员生命周期", [
+        ("注册", "flow-membership-register"),
+        ("下单", "flow-order-create"),
+        ("累计", "flow-points-accrual"),
+    ]),
+    # Order fulfillment
+    ("订单履约", [
+        ("下单", "flow-order-create"),
+        ("跟进", "flow-service-followup"),
+    ]),
+    # Production cycle
+    ("生产周期", [
+        ("排产", "flow-production-scheduling"),
+        ("来料检验", "flow-incoming-inspection"),
+        ("入库", "flow-warehouse-inbound"),
+    ]),
+    # Supply chain
+    ("供应链流程", [
+        ("采购", "flow-purchase-request"),
+    ]),
+    # Credit lifecycle
+    ("信贷流程", [
+        ("信贷申请", "flow-credit-application"),
+        ("风险评级", "flow-risk-assessment"),
+        ("合规检查", "flow-compliance-check"),
+        ("客户画像", "flow-customer-profiling"),
+    ]),
+)
+
+
 # ─── Common actor rules (all industries) ───
 ACTOR_RULES: tuple[tuple[str, str, str], ...] = (
     ("导购", "actor-store-guide", "门店导购"),
@@ -331,6 +365,84 @@ def _populate_flow_steps(
                 blueprint["library"]["flowSteps"].append(flow_step)
 
 
+def _infer_flow_sequences(blueprint: dict[str, Any], source_text: str) -> None:
+    """Add process sequence metadata to flow steps and generate next-step relations."""
+    flow_steps = blueprint["library"]["flowSteps"]
+    step_by_id = {s["id"]: s for s in flow_steps}
+    matched_flow_ids: set[str] = set()
+
+    for process_name, sequence_rules in FLOW_SEQUENCES:
+        # Check if any trigger from this sequence appears in source
+        triggers = [t for t, _ in sequence_rules]
+        if not any(_contains(source_text, t) for t in triggers):
+            continue
+
+        # Build ordered list of flow IDs that actually exist in this blueprint
+        ordered_ids = []
+        for trigger, flow_id in sequence_rules:
+            if flow_id in step_by_id and flow_id not in matched_flow_ids:
+                ordered_ids.append(flow_id)
+                matched_flow_ids.add(flow_id)
+
+        # Add processName and seqIndex to each matched step
+        for idx, fid in enumerate(ordered_ids):
+            step = step_by_id[fid]
+            step["processName"] = process_name
+            step["seqIndex"] = idx
+
+        # Generate nextStep links (within same actor = same lane)
+        for i in range(len(ordered_ids) - 1):
+            from_step = step_by_id[ordered_ids[i]]
+            to_step = step_by_id[ordered_ids[i + 1]]
+            from_step.setdefault("nextStepIds", []).append(to_step["id"])
+
+
+def _infer_relations(blueprint: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate relations array from blueprint entities."""
+    relations: list[dict[str, Any]] = []
+    lib = blueprint["library"]
+
+    # System → Capability relations (from capabilityIds on systems)
+    for system in lib.get("systems", []):
+        for cid in system.get("capabilityIds", []):
+            relations.append({
+                "id": f"rel-{system['id']}-{cid}",
+                "type": "supports",
+                "from": system["id"],
+                "to": cid,
+                "label": "支撑",
+            })
+
+    # Capability → Actor relations (from flow steps linking actors to capabilities)
+    seen_cap_actor: set[tuple[str, str]] = set()
+    for step in lib.get("flowSteps", []):
+        aid = step.get("actorId", "")
+        for cid in step.get("capabilityIds", []):
+            key = (cid, aid)
+            if aid and key not in seen_cap_actor:
+                seen_cap_actor.add(key)
+                relations.append({
+                    "id": f"rel-{cid}-{aid}",
+                    "type": "owned-by",
+                    "from": cid,
+                    "to": aid,
+                    "label": "执行",
+                })
+
+    # Flow step sequence relations
+    for step in lib.get("flowSteps", []):
+        for next_id in step.get("nextStepIds", []):
+            relations.append({
+                "id": f"rel-flow-{step['id']}-{next_id}",
+                "type": "flows-to",
+                "from": step["id"],
+                "to": next_id,
+                "label": "→",
+            })
+
+    return relations
+
+
 def _populate_systems(
     blueprint: dict[str, Any],
     source_text: str,
@@ -437,8 +549,10 @@ def create_blueprint_from_text(
     _populate_capabilities(blueprint, source_text)
     generated_capability_ids = _generated_capability_ids(blueprint)
     _populate_flow_steps(blueprint, source_text, generated_capability_ids)
+    _infer_flow_sequences(blueprint, source_text)
     _populate_systems(blueprint, source_text, generated_capability_ids)
     _link_system_backlinks(blueprint)
+    blueprint["relations"] = _infer_relations(blueprint)
 
     blueprint["views"] = _build_views(blueprint)
     blueprint["context"]["clarifyRequests"] = [
