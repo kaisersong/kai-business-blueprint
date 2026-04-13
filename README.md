@@ -240,6 +240,8 @@ for rel in bp["relations"]:
 
 ## Version History
 
+**v0.3.1** — CLI fixes: `--from` long Chinese text no longer triggers `File name too long`, stdin pipe support for `--plan`, subprocess `text=True`/bytes compatibility guidance.
+
 **v0.2.0** — SVG layout engine: two-pass dynamic layer height, actor overflow fix, title/layer gap, header clipping fix, legend truncation fix.
 
 **v0.1.0** — Initial release: plan/generate/edit/export/validate pipeline, HTML viewer with in-place editing, SVG/draw.io/Excalidraw/Mermaid exports, industry template packs (common, retail, finance, manufacturing).

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .export_drawio import export_drawio
@@ -35,6 +36,9 @@ def main() -> int:
 
     if args.plan:
         source_text = _read_source_text(args.from_path)
+        # 如果 --from 未提供且存在 stdin 数据，则从 stdin 读取
+        if not source_text and not args.from_path and not sys.stdin.isatty():
+            source_text = sys.stdin.read()
         write_plan_output(Path(args.plan), source_text, args.industry, Path.cwd())
         return 0
 
@@ -86,6 +90,11 @@ def main() -> int:
 def _read_source_text(value: str | None) -> str:
     if not value:
         return ""
+    # 内联文本通常较长且包含中文等非 ASCII 字符，不应当作文件路径处理。
+    # Linux 文件名上限 255 字节，超过此值传给 stat() 会报 OSError: File name too long。
+    # 策略：超过 255 字节直接当内联文本；短字符串才检查是否为文件路径。
+    if len(value.encode("utf-8")) > 255:
+        return value
     path = Path(value)
     return path.read_text(encoding="utf-8") if path.exists() else value
 

@@ -240,6 +240,8 @@ for rel in bp["relations"]:
 
 ## 版本日志
 
+**v0.3.1** — CLI 修复：`--from` 参数长中文文本不再触发 `File name too long`，`--plan` 支持 stdin 管道输入。
+
 **v0.2.0** — SVG 布局引擎：两遍动态层高、角色溢出修复、标题层间距、标题遮挡修复、图例截断修复。
 
 **v0.1.0** — 初始发布：plan/generate/edit/export/validate 管道；HTML 查看器支持原地编辑；SVG/draw.io/Excalidraw/Mermaid 导出；行业模板包（通用、零售、金融、制造）。
