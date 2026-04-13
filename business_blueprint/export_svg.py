@@ -312,10 +312,16 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
         })
 
     # Calculate height (add room for legend at bottom)
-    legend_h = 120  # space for legend
+    legend_h = 180  # space for legend
     max_y = max((n["y"] + NODE_H for n in nodes.values()), default=300)
     height = max_y + LAYER_PAD + 40 + legend_h
-    width = max(600, n_cols * (NODE_W + COL_GAP) + CANVAS_X * 2 + LAYER_PAD * 2)
+
+    # Width: fit all content + padding, accounting for actors if present
+    content_max_x = max(
+        max((n["x"] + NODE_W for n in nodes.values()), default=0),
+        n_cols * (NODE_W + COL_GAP),
+    )
+    width = max(600, content_max_x + CANVAS_X * 2 + LAYER_PAD * 2)
 
     return {
         "nodes": nodes,
@@ -328,15 +334,16 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
 
 
 def _layer_svg(label: str, y: int, w: int, h: int) -> str:
-    """Layer container with flat-top header (no rounded corners that overlap)."""
+    """Layer container with rounded header matching container border."""
     return (
         f'<g class="layer" id="layer-{_esc(label)}">'
-        # Main container border (full rounded rect)
+        # Header bar with rounded corners (full rect, behind label)
+        f'<rect class="layer-header" x="{CANVAS_X}" y="{y}" width="{w}" height="{LAYER_HEADER_H}" '
+        f'rx="6" fill="{C["layer_header_bg"]}"/>'
+        # Border rect (rounded, behind everything)
         f'<rect class="layer-border" x="{CANVAS_X}" y="{y}" width="{w}" height="{h}" '
         f'rx="8" fill="none" stroke="{C["layer_border"]}" stroke-width="1"/>'
-        # Header bar (flat top, rounded bottom only via clip)
-        f'<rect class="layer-header" x="{CANVAS_X}" y="{y}" width="{w}" height="{LAYER_HEADER_H}" '
-        f'fill="{C["layer_header_bg"]}"/>'
+        # Label text (on top)
         f'<text class="layer-label" x="{CANVAS_X + 16}" y="{y + LAYER_HEADER_H // 2 + 4}" '
         f'font-size="12" fill="{C["text_sub"]}" font-family="{FONT}" '
         f'font-weight="600" letter-spacing="0.4">{_esc(label)}</text>'
@@ -368,9 +375,10 @@ def _legend_svg(x: int, y: int) -> str:
         ("Flow Step", C["flow_fill"], C["flow_stroke"], 6),
         ("Actor", C["actor_fill"], C["actor_stroke"], 22),
     ]
+    legend_total_h = 30 + len(items) * 22 + 4 + 2 * 22 + 8  # items + gap + arrows + padding
     parts = [
         f'<g class="legend" transform="translate({x}, {y})">',
-        f'<rect x="0" y="0" width="130" height="{30 + len(items) * 22 + 22}" '
+        f'<rect x="0" y="0" width="130" height="{legend_total_h}" '
         f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1" opacity="0.95"/>',
         f'<text x="12" y="20" font-size="10" fill="{C["text_sub"]}" '
         f'font-family="{FONT}" font-weight="600" letter-spacing="0.3">LEGEND</text>',
@@ -490,7 +498,7 @@ def export_svg(blueprint: dict[str, Any], target: Path) -> None:
         parts.append(_node_svg(nid, n["label"], n["x"], n["y"], n["kind"]))
 
     # Legend (bottom-left, fireworks-tech-graph pattern)
-    parts.append(_legend_svg(CANVAS_X + 10, h - 130))
+    parts.append(_legend_svg(CANVAS_X + 10, h - 180 - 10))
 
     parts.append("</svg>")
     target.write_text("\n".join(parts), encoding="utf-8")
