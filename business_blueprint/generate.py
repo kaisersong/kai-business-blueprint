@@ -9,19 +9,40 @@ from .model import load_json, new_revision_meta, write_json
 from .normalize import merge_or_create_system
 
 
+# ─── Common actor rules (all industries) ───
 ACTOR_RULES: tuple[tuple[str, str, str], ...] = (
     ("导购", "actor-store-guide", "门店导购"),
     ("客服", "actor-service", "客服"),
     ("运营", "actor-ops", "运营"),
+    ("生产经理", "actor-production-mgr", "生产经理"),
+    ("质检", "actor-quality-inspector", "质检员"),
+    ("仓库管理", "actor-warehouse-mgr", "仓库管理员"),
+    ("采购", "actor-purchasing", "采购专员"),
+    ("风控", "actor-risk-analyst", "风控分析师"),
+    ("信贷审批", "actor-credit-approver", "信贷审批员"),
+    ("合规", "actor-compliance", "合规专员"),
+    ("项目经理", "actor-project-mgr", "项目经理"),
+    ("财务", "actor-finance", "财务专员"),
 )
 
+# ─── Common capability rules ───
 CAPABILITY_RULES: tuple[tuple[str, str, str, str], ...] = (
     ("会员", "cap-membership", "会员运营", "管理会员拉新、促活和留存。"),
     ("订单", "cap-order", "订单管理", "管理订单创建、处理和履约。"),
     ("门店", "cap-store-ops", "门店运营", "支撑门店日常经营和导购协作。"),
+    ("生产计划", "cap-production-plan", "生产计划管理", "管理生产排程、产能规划和生产调度。"),
+    ("质检", "cap-quality-control", "质量管理", "管理来料检验、过程检验和成品检验。"),
+    ("仓储", "cap-warehouse", "仓储管理", "管理入库、出库、库存和库位。"),
+    ("供应链", "cap-supply-chain", "供应链协同", "管理供应商协同、采购计划和物流。"),
+    ("风控", "cap-risk-control", "风险控制", "管理风险评估、预警和处置。"),
+    ("信贷", "cap-credit", "信贷管理", "管理信贷申请、审批和放款。"),
+    ("合规", "cap-compliance", "合规管理", "管理合规检查、审计和报告。"),
+    ("客户画像", "cap-customer-profile", "客户画像", "构建和维护客户360度画像。"),
 )
 
+# ─── Common flow rules ───
 FLOW_RULES: tuple[tuple[str, dict[str, Any]], ...] = (
+    # Retail flows
     (
         "注册",
         {
@@ -58,12 +79,141 @@ FLOW_RULES: tuple[tuple[str, dict[str, Any]], ...] = (
             "capabilityIds": ["cap-order"],
         },
     ),
+    # Manufacturing flows
+    (
+        "排产",
+        {
+            "id": "flow-production-scheduling",
+            "name": "生产排程",
+            "actorId": "actor-production-mgr",
+            "capabilityIds": ["cap-production-plan"],
+        },
+    ),
+    (
+        "生产计划",
+        {
+            "id": "flow-production-scheduling",
+            "name": "生产排程",
+            "actorId": "actor-production-mgr",
+            "capabilityIds": ["cap-production-plan"],
+        },
+    ),
+    (
+        "来料检验",
+        {
+            "id": "flow-incoming-inspection",
+            "name": "来料检验",
+            "actorId": "actor-quality-inspector",
+            "capabilityIds": ["cap-quality-control"],
+        },
+    ),
+    (
+        "质检",
+        {
+            "id": "flow-incoming-inspection",
+            "name": "来料检验",
+            "actorId": "actor-quality-inspector",
+            "capabilityIds": ["cap-quality-control"],
+        },
+    ),
+    (
+        "入库",
+        {
+            "id": "flow-warehouse-inbound",
+            "name": "入库作业",
+            "actorId": "actor-warehouse-mgr",
+            "capabilityIds": ["cap-warehouse"],
+        },
+    ),
+    (
+        "仓储",
+        {
+            "id": "flow-warehouse-inbound",
+            "name": "入库作业",
+            "actorId": "actor-warehouse-mgr",
+            "capabilityIds": ["cap-warehouse"],
+        },
+    ),
+    (
+        "采购申请",
+        {
+            "id": "flow-purchase-request",
+            "name": "采购申请",
+            "actorId": "actor-purchasing",
+            "capabilityIds": ["cap-supply-chain"],
+        },
+    ),
+    (
+        "采购",
+        {
+            "id": "flow-purchase-request",
+            "name": "采购申请",
+            "actorId": "actor-purchasing",
+            "capabilityIds": ["cap-supply-chain"],
+        },
+    ),
+    (
+        "供应链",
+        {
+            "id": "flow-purchase-request",
+            "name": "采购申请",
+            "actorId": "actor-purchasing",
+            "capabilityIds": ["cap-supply-chain"],
+        },
+    ),
+    # Finance flows
+    (
+        "信贷申请",
+        {
+            "id": "flow-credit-application",
+            "name": "信贷申请",
+            "actorId": "actor-credit-approver",
+            "capabilityIds": ["cap-credit"],
+        },
+    ),
+    (
+        "风险评级",
+        {
+            "id": "flow-risk-assessment",
+            "name": "风险评级",
+            "actorId": "actor-risk-analyst",
+            "capabilityIds": ["cap-risk-control"],
+        },
+    ),
+    (
+        "合规检查",
+        {
+            "id": "flow-compliance-check",
+            "name": "合规检查",
+            "actorId": "actor-compliance",
+            "capabilityIds": ["cap-compliance"],
+        },
+    ),
+    (
+        "客户画像",
+        {
+            "id": "flow-customer-profiling",
+            "name": "客户画像构建",
+            "actorId": "actor-risk-analyst",
+            "capabilityIds": ["cap-customer-profile"],
+        },
+    ),
 )
 
+# ─── Common system rules ───
 SYSTEM_RULES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("CRM", "CRM", "客户关系管理系统", ("cap-membership", "cap-order")),
+    # Retail systems
+    ("CRM", "CRM", "客户关系管理系统", ("cap-membership", "cap-order", "cap-customer-profile")),
     ("POS", "POS", "门店收银与交易系统", ("cap-order",)),
-    ("ERP", "ERP", "企业资源计划系统", ("cap-store-ops",)),
+    ("ERP", "ERP", "企业资源计划系统", ("cap-store-ops", "cap-production-plan", "cap-warehouse")),
+    # Manufacturing systems
+    ("MES", "MES", "制造执行系统", ("cap-production-plan", "cap-quality-control")),
+    ("WMS", "WMS", "仓储管理系统", ("cap-warehouse",)),
+    ("SCM", "SCM", "供应链管理系统", ("cap-supply-chain",)),
+    # Finance systems
+    ("风控引擎", "risk-engine", "风控引擎系统", ("cap-risk-control", "cap-customer-profile")),
+    ("信贷系统", "credit-system", "信贷管理系统", ("cap-credit",)),
+    ("反欺诈", "anti-fraud", "反欺诈系统", ("cap-risk-control",)),
 )
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .export_drawio import export_drawio
 from .export_excalidraw import export_excalidraw
+from .export_mermaid import export_mermaid
 from .export_svg import export_svg
 from .generate import write_plan_output
 from .model import load_json
@@ -67,6 +68,7 @@ def main() -> int:
         export_svg(blueprint, export_dir / "solution.svg")
         export_drawio(blueprint, export_dir / "solution.drawio")
         export_excalidraw(blueprint, export_dir / "solution.excalidraw")
+        export_mermaid(blueprint, export_dir / "solution.mermaid.md")
         return 0
 
     if args.validate:

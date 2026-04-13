@@ -1,3 +1,0 @@
-display_name: Business Blueprint Skill
-short_description: Generate AI-friendly business blueprint IR and exports
-default_prompt: Generate editable business capability, swimlane, and application architecture artifacts from presales inputs.
