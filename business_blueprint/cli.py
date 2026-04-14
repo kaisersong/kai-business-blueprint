@@ -9,7 +9,7 @@ from .export_drawio import export_drawio
 from .export_excalidraw import export_excalidraw
 from .export_html import export_html_viewer
 from .export_mermaid import export_mermaid
-from .export_svg import export_svg, export_product_tree_svg, export_matrix_svg, export_capability_map_svg, export_swimlane_flow_svg
+from .export_svg import export_svg, export_svg_auto, export_product_tree_svg, export_matrix_svg, export_capability_map_svg, export_swimlane_flow_svg
 from .generate import write_plan_output
 from .model import load_json
 from .validate import validate_blueprint
@@ -25,10 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--edit", help="Refresh the static viewer for an existing blueprint.")
     parser.add_argument("--export", help="Export SVG, draw.io, and Excalidraw artifacts.")
+    parser.add_argument("--export-auto", help="Export SVG using content routing + free-flow layout.")
     parser.add_argument("--html", help="Generate self-contained HTML viewer with inline SVG.")
     parser.add_argument("--validate", help="Validate a blueprint and print JSON results.")
     parser.add_argument("--from", dest="from_path", help="Source text or file path.")
     parser.add_argument("--industry", default="common", help="Template pack name.")
+    parser.add_argument("--theme", default="light", choices=["light", "dark"],
+                        help="Color theme for HTML output (default: light).")
     return parser
 
 
@@ -55,7 +58,7 @@ def main() -> int:
         )
         # Also generate self-contained HTML viewer with inline SVG
         html_path = viewer_path.with_name("solution.viewer.html")
-        export_html_viewer(load_json(blueprint_path), html_path)
+        export_html_viewer(load_json(blueprint_path), html_path, theme=args.theme)
         return 0
 
     if args.edit:
@@ -74,14 +77,22 @@ def main() -> int:
         blueprint = load_json(blueprint_path)
         export_dir = blueprint_path.with_name("solution.exports")
         export_dir.mkdir(parents=True, exist_ok=True)
-        export_svg(blueprint, export_dir / "solution.svg")
-        export_capability_map_svg(blueprint, export_dir / "capability-map.svg")
-        export_swimlane_flow_svg(blueprint, export_dir / "swimlane-flow.svg")
-        export_product_tree_svg(blueprint, export_dir / "product-tree.svg")
-        export_matrix_svg(blueprint, export_dir / "capability-matrix.svg")
+        export_svg(blueprint, export_dir / "solution.svg", theme=args.theme)
+        export_capability_map_svg(blueprint, export_dir / "capability-map.svg", theme=args.theme)
+        export_swimlane_flow_svg(blueprint, export_dir / "swimlane-flow.svg", theme=args.theme)
+        export_product_tree_svg(blueprint, export_dir / "product-tree.svg", theme=args.theme)
+        export_matrix_svg(blueprint, export_dir / "capability-matrix.svg", theme=args.theme)
         export_drawio(blueprint, export_dir / "solution.drawio")
         export_excalidraw(blueprint, export_dir / "solution.excalidraw")
         export_mermaid(blueprint, export_dir / "solution.mermaid.md")
+        return 0
+
+    if args.export_auto:
+        blueprint_path = Path(args.export_auto)
+        blueprint = load_json(blueprint_path)
+        export_dir = blueprint_path.with_name("solution.exports")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_svg_auto(blueprint, export_dir / "solution.auto.svg", theme=args.theme)
         return 0
 
     if args.html:
@@ -89,7 +100,7 @@ def main() -> int:
         blueprint = load_json(blueprint_path)
         html_path = Path(args.html)
         html_path.parent.mkdir(parents=True, exist_ok=True)
-        export_html_viewer(blueprint, html_path)
+        export_html_viewer(blueprint, html_path, theme=args.theme)
         return 0
 
     if args.validate:

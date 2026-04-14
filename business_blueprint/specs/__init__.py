@@ -43,6 +43,37 @@ RELATION_STYLES: dict[str, dict[str, Any]] = {
 }
 
 
+# ─── Semantic colors by system category ──────────────────────────
+SYSTEM_CATEGORY_COLORS: dict[str, dict[str, Any]] = {
+    "frontend": {"svg_fill": "#ECFEFF", "svg_stroke": "#0891B2"},
+    "backend": {"svg_fill": "#ECFDF5", "svg_stroke": "#10B981"},
+    "database": {"svg_fill": "#F5F3FF", "svg_stroke": "#8B5CF6"},
+    "cloud": {"svg_fill": "#FFFBEB", "svg_stroke": "#F59E0B"},
+    "security": {"svg_fill": "#FFF1F2", "svg_stroke": "#F43F5E"},
+    "external": {"svg_fill": "#F8FAFC", "svg_stroke": "#64748B"},
+}
+
+CATEGORY_ALIASES: dict[str, str] = {
+    "web": "frontend", "mobile": "frontend", "ui": "frontend",
+    "api": "backend", "service": "backend", "microservice": "backend",
+    "storage": "database",
+    "infra": "cloud", "infrastructure": "cloud", "devops": "cloud",
+    "auth": "security",
+    "third-party": "external", "third_party": "external", "saas": "external",
+}
+
+
+def _resolve_system_style(category: str | None) -> dict[str, Any] | None:
+    """Get semantic colors for a system node by its category."""
+    if not category:
+        return None
+    canonical = CATEGORY_ALIASES.get(category, category)
+    colors = SYSTEM_CATEGORY_COLORS.get(canonical)
+    if not colors:
+        return None
+    return {"svg_fill": colors["svg_fill"], "svg_stroke": colors["svg_stroke"]}
+
+
 # ─── Layout helpers ──────────────────────────────────────────────
 def _grid_positions(count: int, cols: int = 3, x_start: int = 40, y_start: int = 40,
                     cell_w: int = 200, cell_h: int = 80, gap: int = 20) -> list[tuple[int, int]]:
@@ -71,13 +102,32 @@ def build_node_specs(
     entities: list[dict[str, Any]],
     kind_map: dict[str, str] | None = None,
     cols: int = 3,
+    system_categories: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return a list of node specs with positions and styles."""
+    """Return a list of node specs with positions and styles.
+
+    Args:
+        entities: List of entity dicts with 'id' and 'name'.
+        kind_map: Optional mapping from entity id to kind.
+        cols: Number of grid columns.
+        system_categories: Optional mapping from system id to category string.
+    """
     positions = _grid_positions(len(entities), cols=cols)
     specs: list[dict[str, Any]] = []
     for idx, entity in enumerate(entities):
         kind = kind_map.get(entity["id"], _kind_for_entity(entity)) if kind_map else _kind_for_entity(entity)
         style = NODE_STYLES.get(kind, NODE_STYLES["capability"])
+
+        # Apply semantic colors for system nodes with a category
+        if kind == "system" and system_categories and entity["id"] in system_categories:
+            semantic = _resolve_system_style(system_categories[entity["id"]])
+            if semantic:
+                svg_style = style["svg"].copy()
+                svg_style["fill"] = semantic["svg_fill"]
+                svg_style["stroke"] = semantic["svg_stroke"]
+                style = dict(style)
+                style["svg"] = svg_style
+
         x, y = positions[idx]
         specs.append({
             "id": entity["id"],

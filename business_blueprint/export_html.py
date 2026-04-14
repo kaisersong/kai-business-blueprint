@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
-from .export_svg import C, FONT, FONT_MONO, CANVAS_X as SVG_CANVAS_X
+from .export_svg import C, C_LIGHT, C_DARK, FONT, FONT_MONO, CANVAS_X as SVG_CANVAS_X, _resolve_theme, _content_router
 
 # ── Design tokens ──
 _LAYER_PAD = 28
@@ -43,7 +43,8 @@ def _calc_cols(n: int) -> int:
     return 4
 
 
-def _build_three_layer_svg(bp: dict[str, Any]) -> str:
+def _build_three_layer_svg(bp: dict[str, Any], colors: dict | None = None) -> str:
+    c = colors if colors is not None else C
     """Build SVG with three explicit layers: systems → capabilities(domains) → actors.
 
     Width is capped at _MAX_CANVAS_W. If content exceeds this, the layout
@@ -76,7 +77,7 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="0" '
         f'font-family="{FONT}">'
     )
-    parts.append(f'<rect width="{canvas_w}" height="0" fill="{C["bg"]}"/>')
+    parts.append(f'<rect width="{canvas_w}" height="0" fill="{c["bg"]}"/>')
 
     # Title
     title = bp.get("meta", {}).get("title", "Business Blueprint")
@@ -85,10 +86,10 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
     parts.append(
         f'<g class="title-block">'
         f'<rect x="{PAD_X}" y="{PAD_Y}" width="{content_w}" height="52" '
-        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
-        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" font-size="16" fill="{C["text_main"]}" '
+        f'rx="6" fill="{c["canvas"]}" stroke="{c["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" font-size="16" fill="{c["text_main"]}" '
         f'font-family="{FONT}" font-weight="700">{_esc(title)} — 架构总览</text>'
-        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" font-size="11" fill="{C["text_sub"]}" '
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" font-size="11" fill="{c["text_sub"]}" '
         f'font-family="{FONT_MONO}">{_esc(subtitle)}</text></g>'
     )
 
@@ -105,7 +106,7 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
     sys_start_x = PAD_X + (content_w - sys_total_w) / 2
 
     parts.append(
-        f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{C["sys_stroke"]}" '
+        f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{c["sys_stroke"]}" '
         f'font-weight="700">应用系统层 ({len(systems)})</text>'
     )
     current_y += 14 + _LAYER_PAD
@@ -119,9 +120,9 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
         node_pos[sys["id"]] = (sx + _SYS_CARD_W / 2, sy + _SYS_CARD_H / 2)
         parts.append(
             f'<rect x="{sx}" y="{sy}" width="{_SYS_CARD_W}" height="{_SYS_CARD_H}" '
-            f'rx="6" fill="{C["sys_fill"]}" stroke="{C["sys_stroke"]}" stroke-width="1.5"/>'
+            f'rx="6" fill="{c["sys_fill"]}" stroke="{c["sys_stroke"]}" stroke-width="1.5"/>'
             f'<text x="{sx + _SYS_CARD_W / 2}" y="{sy + _SYS_CARD_H / 2 + 5}" '
-            f'text-anchor="middle" font-size="12" fill="{C["text_main"]}" '
+            f'text-anchor="middle" font-size="12" fill="{c["text_main"]}" '
             f'font-weight="600">{_esc(sys["name"])}</text>'
         )
 
@@ -132,7 +133,7 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
     # Layer 1: 业务能力层 (按域分组, 域自动换行)
     # ══════════════════════════════════════════
     parts.append(
-        f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{C["cap_stroke"]}" '
+        f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{c["cap_stroke"]}" '
         f'font-weight="700">业务能力层 ({len(capabilities)} 能力 / {len(domain_caps)} 域)</text>'
     )
     current_y += 14 + _LAYER_PAD
@@ -193,12 +194,12 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
         # Domain background
         parts.append(
             f'<rect x="{domain_x}" y="{domain_y}" width="{domain_w}" height="{domain_inner_h}" '
-            f'rx="10" fill="{C["cap_fill"]}" stroke="{C["cap_stroke"]}" stroke-width="1" opacity="0.4"/>'
+            f'rx="10" fill="{c["cap_fill"]}" stroke="{c["cap_stroke"]}" stroke-width="1" opacity="0.4"/>'
         )
         # Domain label
         parts.append(
             f'<text x="{domain_x + domain_w / 2}" y="{domain_y + 18}" '
-            f'text-anchor="middle" font-size="11" fill="{C["cap_stroke"]}" '
+            f'text-anchor="middle" font-size="11" fill="{c["cap_stroke"]}" '
             f'font-weight="600">{_esc(domain)} ({len(caps)})</text>'
         )
 
@@ -214,9 +215,9 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
             node_pos[cap["id"]] = (cx + _CAP_CARD_W / 2, cy + _CAP_CARD_H / 2)
             parts.append(
                 f'<rect x="{cx}" y="{cy}" width="{_CAP_CARD_W}" height="{_CAP_CARD_H}" '
-                f'rx="{_CAP_CARD_RX}" fill="{C["canvas"]}" stroke="{C["cap_stroke"]}" stroke-width="1"/>'
+                f'rx="{_CAP_CARD_RX}" fill="{c["canvas"]}" stroke="{c["cap_stroke"]}" stroke-width="1"/>'
                 f'<text x="{cx + _CAP_CARD_W / 2}" y="{cy + _CAP_CARD_H / 2 + 5}" '
-                f'text-anchor="middle" font-size="11" fill="{C["text_main"]}" '
+                f'text-anchor="middle" font-size="11" fill="{c["text_main"]}" '
                 f'font-weight="500">{_esc(cap["name"])}</text>'
             )
 
@@ -233,7 +234,7 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
     actor_start_x = PAD_X + (content_w - actor_total_w) / 2
 
     parts.append(
-        f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{C["actor_stroke"]}" '
+        f'<text x="{PAD_X}" y="{current_y}" font-size="13" fill="{c["actor_stroke"]}" '
         f'font-weight="700">参与者层 ({len(actors)})</text>'
     )
     current_y += 14 + _LAYER_PAD
@@ -247,9 +248,9 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
         node_pos[actor["id"]] = (ax + _ACTOR_W / 2, ay + _ACTOR_H / 2)
         parts.append(
             f'<rect x="{ax}" y="{ay}" width="{_ACTOR_W}" height="{_ACTOR_H}" '
-            f'rx="{_ACTOR_RX}" fill="{C["actor_fill"]}" stroke="{C["actor_stroke"]}" stroke-width="1.5"/>'
+            f'rx="{_ACTOR_RX}" fill="{c["actor_fill"]}" stroke="{c["actor_stroke"]}" stroke-width="1.5"/>'
             f'<text x="{ax + _ACTOR_W / 2}" y="{ay + _ACTOR_H / 2 + 5}" '
-            f'text-anchor="middle" font-size="11.5" fill="{C["text_main"]}" '
+            f'text-anchor="middle" font-size="11.5" fill="{c["text_main"]}" '
             f'font-weight="600">{_esc(actor["name"])}</text>'
         )
 
@@ -273,7 +274,7 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
                 arrow_parts.append(
                     f'<line x1="{int(sx)}" y1="{int(sy + _SYS_CARD_H / 2)}" '
                     f'x2="{int(cx)}" y2="{int(cy - _CAP_CARD_H / 2)}" '
-                    f'stroke="{C["arrow_muted"]}" stroke-width="1" stroke-dasharray="3,3" '
+                    f'stroke="{c["arrow_muted"]}" stroke-width="1" stroke-dasharray="3,3" '
                     f'opacity="0.3"/>'
                 )
 
@@ -292,7 +293,7 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
         arrow_parts.append(
             f'<line x1="{int(ax)}" y1="{int(ay - _ACTOR_H / 2)}" '
             f'x2="{int(cx)}" y2="{int(cy + _CAP_CARD_H / 2)}" '
-            f'stroke="{C["actor_stroke"]}" stroke-width="1" stroke-dasharray="4,3" '
+            f'stroke="{c["actor_stroke"]}" stroke-width="1" stroke-dasharray="4,3" '
             f'opacity="0.25"/>'
         )
 
@@ -301,12 +302,13 @@ def _build_three_layer_svg(bp: dict[str, Any]) -> str:
 
     canvas_h = layer2_bottom + 30
     parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
-    parts[1] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>'
+    parts[1] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{c["bg"]}"/>'
     parts.append("</svg>")
     return "\n".join(parts)
 
 
-def _build_capability_map_svg(bp: dict[str, Any]) -> str:
+def _build_capability_map_svg(bp: dict[str, Any], colors: dict | None = None) -> str:
+    c = colors if colors is not None else C
     """Build inline SVG for capability map with domain grouping."""
     lib = bp.get("library", {})
     capabilities = lib.get("capabilities", [])
@@ -332,7 +334,7 @@ def _build_capability_map_svg(bp: dict[str, Any]) -> str:
     parts.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" font-family="{FONT}">'
     )
-    parts.append(f'<rect width="0" height="0" fill="{C["bg"]}"/>')
+    parts.append(f'<rect width="0" height="0" fill="{c["bg"]}"/>')
 
     title = bp.get("meta", {}).get("title", "Business Blueprint")
     industry = bp.get("meta", {}).get("industry", "")
@@ -357,17 +359,17 @@ def _build_capability_map_svg(bp: dict[str, Any]) -> str:
     canvas_h = current_y + PAD_Y
 
     parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
-    parts[1] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>'
+    parts[1] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{c["bg"]}"/>'
 
     current_y = PAD_Y + _TITLE_H
 
     parts.append(
         f'<g class="title-block">'
         f'<rect x="{PAD_X}" y="{PAD_Y}" width="{canvas_w - PAD_X * 2}" height="52" '
-        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
-        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" font-size="16" fill="{C["text_main"]}" '
+        f'rx="6" fill="{c["canvas"]}" stroke="{c["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" font-size="16" fill="{c["text_main"]}" '
         f'font-family="{FONT}" font-weight="700">{_esc(title)} — 能力地图</text>'
-        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" font-size="11" fill="{C["text_sub"]}" '
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" font-size="11" fill="{c["text_sub"]}" '
         f'font-family="{FONT_MONO}">{_esc(subtitle)}</text></g>'
     )
 
@@ -386,12 +388,12 @@ def _build_capability_map_svg(bp: dict[str, Any]) -> str:
         # Domain container
         parts.append(
             f'<rect x="{domain_x}" y="{current_y}" width="{domain_w}" height="{domain_h}" '
-            f'rx="10" fill="{C["cap_fill"]}" stroke="{C["cap_stroke"]}" stroke-width="1" opacity="0.4"/>'
+            f'rx="10" fill="{c["cap_fill"]}" stroke="{c["cap_stroke"]}" stroke-width="1" opacity="0.4"/>'
         )
         # Domain label
         parts.append(
             f'<text x="{domain_x + domain_w / 2}" y="{current_y + 18}" '
-            f'text-anchor="middle" font-size="12" fill="{C["cap_stroke"]}" '
+            f'text-anchor="middle" font-size="12" fill="{c["cap_stroke"]}" '
             f'font-weight="700">{_esc(domain)} ({len(caps)})</text>'
         )
 
@@ -408,9 +410,9 @@ def _build_capability_map_svg(bp: dict[str, Any]) -> str:
 
             parts.append(
                 f'<rect x="{cx}" y="{cy}" width="{_CAP_CARD_W}" height="{_CAP_CARD_H}" '
-                f'rx="{_CARD_RX}" fill="{C["canvas"]}" stroke="{C["cap_stroke"]}" stroke-width="1.5"/>'
+                f'rx="{_CARD_RX}" fill="{c["canvas"]}" stroke="{c["cap_stroke"]}" stroke-width="1.5"/>'
                 f'<text x="{cx + _CAP_CARD_W / 2}" y="{cy + _CAP_CARD_H / 2 + 5}" '
-                f'text-anchor="middle" font-size="11" fill="{C["text_main"]}" '
+                f'text-anchor="middle" font-size="11" fill="{c["text_main"]}" '
                 f'font-weight="500">{_esc(cap["name"])}</text>'
             )
             # Supporting systems as small badges
@@ -420,21 +422,22 @@ def _build_capability_map_svg(bp: dict[str, Any]) -> str:
                 ty = cy + _CAP_CARD_H - 16
                 parts.append(
                     f'<rect x="{tx}" y="{ty}" width="{tw}" height="13" '
-                    f'rx="3" fill="{C["sys_fill"]}" stroke="{C["sys_stroke"]}" stroke-width="0.5"/>'
+                    f'rx="3" fill="{c["sys_fill"]}" stroke="{c["sys_stroke"]}" stroke-width="0.5"/>'
                     f'<text x="{tx + tw / 2}" y="{ty + 10}" '
-                    f'text-anchor="middle" font-size="7.5" fill="{C["text_main"]}">{_esc(sname)}</text>'
+                    f'text-anchor="middle" font-size="7.5" fill="{c["text_main"]}">{_esc(sname)}</text>'
                 )
 
         current_y += domain_h + _CARD_GAP
 
     canvas_h = current_y + PAD_Y
     parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
-    parts[1] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>'
+    parts[1] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{c["bg"]}"/>'
     parts.append("</svg>")
     return "\n".join(parts)
 
 
-def _build_swimlane_svg(bp: dict[str, Any]) -> str:
+def _build_swimlane_svg(bp: dict[str, Any], colors: dict | None = None) -> str:
+    c = colors if colors is not None else C
     """Build inline SVG for actor-capability relationships as swimlane view."""
     lib = bp.get("library", {})
     actors = lib.get("actors", [])
@@ -498,7 +501,7 @@ def _build_swimlane_svg(bp: dict[str, Any]) -> str:
                 f'<rect x="{cx}" y="{cy}" width="{CAP_W}" height="{CAP_H}" '
                 f'rx="{CAP_RX}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>'
                 f'<text x="{cx + CAP_W / 2}" y="{cy + CAP_H / 2 + 5}" '
-                f'text-anchor="middle" font-size="10.5" fill="{C["text_main"]}" '
+                f'text-anchor="middle" font-size="10.5" fill="{c["text_main"]}" '
                 f'font-weight="500">{_esc(cap["name"])}</text>'
             )
             # Domain badge
@@ -521,32 +524,136 @@ def _build_swimlane_svg(bp: dict[str, Any]) -> str:
     title = bp.get("meta", {}).get("title", "Business Blueprint")
     parts.insert(0,
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
-        f'<rect width="{canvas_w}" height="{canvas_h}" fill="{C["bg"]}"/>'
+        f'<rect width="{canvas_w}" height="{canvas_h}" fill="{c["bg"]}"/>'
         f'<g class="title-block">'
         f'<rect x="{PAD_X}" y="{PAD_Y}" width="{canvas_w - PAD_X * 2}" height="52" '
-        f'rx="6" fill="{C["canvas"]}" stroke="{C["border"]}" stroke-width="1"/>'
-        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" font-size="16" fill="{C["text_main"]}" '
+        f'rx="6" fill="{c["canvas"]}" stroke="{c["border"]}" stroke-width="1"/>'
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 24}" font-size="16" fill="{c["text_main"]}" '
         f'font-family="{FONT}" font-weight="700">{_esc(title)} — 参与者能力</text>'
-        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" font-size="11" fill="{C["text_sub"]}" '
+        f'<text x="{PAD_X + 16}" y="{PAD_Y + 42}" font-size="11" fill="{c["text_sub"]}" '
         f'font-family="{FONT_MONO}">Actor-Capability Matrix</text></g>'
     )
     parts.append("</svg>")
     return "\n".join(parts)
 
 
-def export_html_viewer(blueprint: dict[str, Any], target: Path) -> None:
-    """Generate a self-contained HTML viewer with inline SVG diagrams."""
+def export_html_viewer(blueprint: dict[str, Any], target: Path, theme: str = "light") -> None:
+    """Generate a self-contained HTML viewer with inline SVG diagrams.
+
+    Uses content routing to decide which views to include based on blueprint content.
+
+    Args:
+        blueprint: The canonical blueprint JSON.
+        target: Output file path.
+        theme: Color theme — "light" (default) or "dark".
+    """
+    colors = _resolve_theme(theme)
     title = blueprint.get("meta", {}).get("title", "Business Blueprint")
     industry = blueprint.get("meta", {}).get("industry", "")
     revision = blueprint.get("meta", {}).get("revisionId", "unknown")
     created_at = blueprint.get("meta", {}).get("createdAt", "")
     created_by = blueprint.get("meta", {}).get("createdBy", "")
 
-    layer_svg = _build_three_layer_svg(blueprint)
-    cap_svg = _build_capability_map_svg(blueprint)
-    swim_svg = _build_swimlane_svg(blueprint)
+    # Use content router to decide which views to generate
+    views = _content_router(blueprint)
+
+    # Build SVGs based on routed views; fall back to classic three views if routing found nothing
+    if views:
+        view_svgs: dict[str, str] = {}
+        view_titles: dict[str, str] = {}
+        for view in views:
+            if view["type"] == "architecture":
+                view_svgs["layer"] = _build_three_layer_svg(blueprint, colors=colors)
+                view_titles["layer"] = "三层架构"
+            elif view["type"] == "capability_map":
+                view_svgs["capability"] = _build_capability_map_svg(blueprint, colors=colors)
+                view_titles["capability"] = "能力地图"
+            elif view["type"] == "swimlane":
+                view_svgs["swimlane"] = _build_swimlane_svg(blueprint, colors=colors)
+                view_titles["swimlane"] = "参与者能力"
+        layer_svg = view_svgs.get("layer", _build_three_layer_svg(blueprint, colors=colors))
+        cap_svg = view_svgs.get("capability", _build_capability_map_svg(blueprint, colors=colors))
+        swim_svg = view_svgs.get("swimlane", _build_swimlane_svg(blueprint, colors=colors))
+    else:
+        layer_svg = _build_three_layer_svg(blueprint, colors=colors)
+        cap_svg = _build_capability_map_svg(blueprint, colors=colors)
+        swim_svg = _build_swimlane_svg(blueprint, colors=colors)
+
+    # Compute summary stats from blueprint
+    lib = blueprint.get("library", {})
+    n_systems = len(lib.get("systems", []))
+    n_capabilities = len(lib.get("capabilities", []))
+    n_actors = len(lib.get("actors", []))
+    n_flow_steps = len(lib.get("flowSteps", []))
+
+    # Coverage: systems with capabilityIds / total systems
+    systems_with_caps = sum(1 for s in lib.get("systems", []) if s.get("capabilityIds"))
+    sys_coverage = f"{int(systems_with_caps / n_systems * 100)}%" if n_systems else "N/A"
 
     safe_json = json.dumps(json.dumps(blueprint, ensure_ascii=False)).replace("</", "<\\/")
+
+    # Theme-aware CSS
+    bg_color = colors["bg"]
+    text_main = colors["text_main"]
+    text_sub = colors["text_sub"]
+    border = colors["border"]
+    cap_stroke = colors["cap_stroke"]
+    canvas = colors["canvas"]
+    header_bg = "#020617" if theme == "dark" else "#0F2742"
+    header_text = "#E2E8F0" if theme == "dark" else "#fff"
+    tab_bg = colors["canvas"]
+    card_bg = colors["canvas"]
+    card_border = colors["border"]
+    card_text = colors["text_main"]
+    card_text_sub = colors["text_sub"]
+    accent = colors["cap_stroke"]
+
+    # Dark theme CSS extras
+    dark_extras = ""
+    if theme == "dark":
+        dark_extras = f"""
+        .header {{ background: {header_bg}; color: {header_text}; }}
+        .header .meta {{ font-size: 13px; color: #94A3B8; }}
+        .tabs {{ background: {colors["layer_header_bg"]}; border-bottom-color: {border}; }}
+        .tab {{ color: {text_sub}; }}
+        .tab:hover {{ color: {text_main}; }}
+        .tab.active {{ color: {accent}; border-bottom-color: {accent}; }}
+        .viewer {{ background: {bg_color}; }}
+        .viewer svg {{ box-shadow: 0 2px 12px rgba(0,0,0,0.4); }}
+        .summary-cards {{ background: linear-gradient(180deg, {colors["layer_header_bg"]}, {bg_color}); }}
+        .summary-card {{ background: {card_bg}; border-color: {card_border}; }}
+        .summary-card .card-value {{ color: {text_main}; }}
+        .summary-card .card-label {{ color: {text_sub}; }}
+        body {{ background: linear-gradient(180deg, {colors["bg"]} 0%, #0F172A 100%); }}
+"""
+    else:
+        dark_extras = f"""
+        .summary-cards {{ background: linear-gradient(180deg, {colors["layer_header_bg"]}, {bg_color}); }}
+        .summary-card {{ background: {card_bg}; border-color: {card_border}; }}
+        .summary-card .card-value {{ color: {text_main}; }}
+        .summary-card .card-label {{ color: {text_sub}; }}
+"""
+
+    # Dark theme grid background
+    grid_bg = ""
+    if theme == "dark":
+        grid_bg = '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background-image:linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;"></div>'
+
+    # Build dynamic tabs and panes based on available views
+    view_map = {"layer": layer_svg, "capability": cap_svg, "swimlane": swim_svg}
+    view_labels = {"layer": "三层架构", "capability": "能力地图", "swimlane": "参与者能力"}
+
+    # Only include tabs for views that have non-empty SVG content
+    active_views = [k for k in ["layer", "capability", "swimlane"] if k in view_map]
+    if not active_views:
+        active_views = ["layer"]
+
+    tabs_html = ""
+    panes_html = ""
+    for i, vk in enumerate(active_views):
+        active_class = " active" if i == 0 else ""
+        tabs_html += f'<button class="tab{active_class}" data-pane="{vk}">{view_labels[vk]}</button>'
+        panes_html += f'<div class="viewer-pane{active_class}" id="pane-{vk}"><div class="viewer" id="svg-{vk}">{view_map[vk]}</div></div>'
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -556,33 +663,57 @@ def export_html_viewer(blueprint: dict[str, Any], target: Path) -> None:
     <title>{_esc(title)}</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: {FONT}; background: {C["bg"]}; color: {C["text_main"]}; }}
-        .header {{ background: #0F2742; color: #fff; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }}
+        body {{ font-family: {FONT}; background: {bg_color}; color: {text_main}; position: relative; }}
+        .header {{ background: {header_bg}; color: {header_text}; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; }}
         .header h1 {{ font-size: 18px; font-weight: 600; }}
         .header .meta {{ font-size: 13px; color: #94A3B8; }}
-        .tabs {{ display: flex; padding: 0 24px; background: #FFFFFF; border-bottom: 1px solid {C["border"]}; }}
-        .tab {{ padding: 12px 20px; font-size: 14px; font-weight: 500; color: {C["text_sub"]}; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; }}
-        .tab:hover {{ color: {C["text_main"]}; }}
-        .tab.active {{ color: {C["cap_stroke"]}; border-bottom-color: {C["cap_stroke"]}; }}
-        .viewer {{ padding: 24px; overflow: auto; display: flex; justify-content: center; }}
-        .viewer svg {{ max-width: 100%; height: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-radius: 8px; }}
+        .tabs {{ display: flex; padding: 0 24px; background: {tab_bg}; border-bottom: 1px solid {border}; position: relative; z-index: 1; }}
+        .tab {{ padding: 12px 20px; font-size: 14px; font-weight: 500; color: {text_sub}; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; }}
+        .tab:hover {{ color: {text_main}; }}
+        .tab.active {{ color: {cap_stroke}; border-bottom-color: {cap_stroke}; }}
+        .viewer {{ padding: 24px; overflow: auto; display: flex; justify-content: center; position: relative; z-index: 1; }}
+        .viewer svg {{ max-width: 100%; height: auto; border-radius: 8px; }}
         .viewer-pane {{ display: none; }}
         .viewer-pane.active {{ display: flex; }}
+        /* Summary cards */
+        .summary-cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; padding: 24px; margin: 0 24px; position: relative; z-index: 1; }}
+        .summary-card {{ border-radius: 8px; border: 1px solid {card_border}; padding: 16px 20px; text-align: center; }}
+        .summary-card .card-value {{ font-size: 28px; font-weight: 700; font-family: {FONT_MONO}; line-height: 1; }}
+        .summary-card .card-label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; font-weight: 500; }}
     </style>
 </head>
 <body>
+    {grid_bg}
     <div class="header">
         <h1 id="page-title">{_esc(title)}</h1>
         <span class="meta" id="page-meta"></span>
     </div>
     <div class="tabs" id="tab-bar">
-        <button class="tab active" data-pane="layer">三层架构</button>
-        <button class="tab" data-pane="capability">能力地图</button>
-        <button class="tab" data-pane="swimlane">参与者能力</button>
+        {tabs_html}
     </div>
-    <div class="viewer-pane active" id="pane-layer"><div class="viewer" id="svg-layer">{layer_svg}</div></div>
-    <div class="viewer-pane" id="pane-capability"><div class="viewer" id="svg-capability">{cap_svg}</div></div>
-    <div class="viewer-pane" id="pane-swimlane"><div class="viewer" id="svg-swimlane">{swim_svg}</div></div>
+    <div class="summary-cards">
+        <div class="summary-card">
+            <div class="card-value">{n_systems}</div>
+            <div class="card-label">Systems</div>
+        </div>
+        <div class="summary-card">
+            <div class="card-value">{n_capabilities}</div>
+            <div class="card-label">Capabilities</div>
+        </div>
+        <div class="summary-card">
+            <div class="card-value">{n_actors}</div>
+            <div class="card-label">Actors</div>
+        </div>
+        <div class="summary-card">
+            <div class="card-value">{n_flow_steps}</div>
+            <div class="card-label">Flow Steps</div>
+        </div>
+        <div class="summary-card">
+            <div class="card-value">{sys_coverage}</div>
+            <div class="card-label">Sys Coverage</div>
+        </div>
+    </div>
+    {panes_html}
     <script>
         const blueprint = JSON.parse({safe_json});
         const m = blueprint.meta || {{}};
@@ -601,3 +732,4 @@ def export_html_viewer(blueprint: dict[str, Any], target: Path) -> None:
 </html>"""
 
     target.write_text(html, encoding="utf-8")
+
