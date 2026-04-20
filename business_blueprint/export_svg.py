@@ -69,9 +69,34 @@ C_DARK = {
 C = C_LIGHT
 
 
-def _resolve_theme(name: str = "light") -> dict:
-    """Return the color palette for the given theme."""
-    return C_DARK if name == "dark" else C_LIGHT
+def _resolve_theme(name: str = "light", industry: str | None = None) -> dict:
+    """Return the color palette for the given theme, with optional industry accent."""
+    base = C_DARK if name == "dark" else C_LIGHT
+    if not industry or industry == "common":
+        return base
+    overrides = INDUSTRY_THEMES.get(industry)
+    if not overrides:
+        return base
+    result = dict(base)
+    accent = overrides["accent"]
+    result["cap_stroke"] = accent
+    result["actor_stroke"] = accent
+    result["arrow"] = accent
+    return result
+
+
+# ─── Industry-specific accent colors ─────────────────────────────
+INDUSTRY_THEMES: dict[str, dict[str, str]] = {
+    "retail": {
+        "accent": "#F97316",
+    },
+    "finance": {
+        "accent": "#3B82F6",
+    },
+    "manufacturing": {
+        "accent": "#6B7280",
+    },
+}
 
 
 # ─── Semantic colors by system category ──────────────────────────
@@ -137,6 +162,33 @@ def _resolve_system_colors(category: str | None, theme: str) -> tuple[str, str]:
     return "", ""
 
 
+# ─── Semantic arrow styles ────────────────────────────────────────
+# Maps relation type → (color, dash_pattern, marker_id).
+# Color values are for dark theme; light theme uses arrow/arrow_muted tokens.
+ARROW_STYLES: dict[str, dict[str, str | None]] = {
+    "supports":   {"color": "#34D399", "dash": None,    "marker": "arrow-solid"},
+    "depends-on": {"color": "#94A3B8", "dash": "6,4",   "marker": "arrow-open"},
+    "flows-to":   {"color": "#60A5FA", "dash": None,    "marker": "arrow-solid"},
+    "owned-by":   {"color": "#FBBF24", "dash": "3,3",   "marker": "arrow-dot"},
+}
+
+# Light theme overrides for arrow colors
+_ARROW_STYLES_LIGHT: dict[str, dict[str, str]] = {
+    "supports":   {"color": "#0B6E6E"},
+    "depends-on": {"color": "#94A3B8"},
+    "flows-to":   {"color": "#3B82F6"},
+    "owned-by":   {"color": "#D97706"},
+}
+
+
+def _resolve_arrow_style(relation_type: str, theme: str) -> dict[str, str | None]:
+    """Get arrow style for a relation type, adjusted for theme."""
+    style = ARROW_STYLES.get(relation_type, ARROW_STYLES["supports"]).copy()
+    if theme == "light" and relation_type in _ARROW_STYLES_LIGHT:
+        style["color"] = _ARROW_STYLES_LIGHT[relation_type]["color"]
+    return style
+
+
 FONT = "system-ui, -apple-system, sans-serif"
 FONT_MONO = "'JetBrains Mono', 'SF Mono', monospace"
 
@@ -171,6 +223,12 @@ def _node_svg(nid: str, label: str, x: int, y: int, kind: str,
         fill, stroke = fill_override, stroke_override
     else:
         fill, stroke, _ = kind_defaults.get(kind, kind_defaults["capability"])
+
+    if kind == "flowStep":
+        return _node_svg_flowstep(nid, label, x, y, fill, stroke, c)
+    if kind == "system":
+        return _node_svg_system(nid, label, x, y, fill, stroke, c)
+
     rx = NODE_RX.get(kind, 8)
     return (
         f'<g class="node node-{kind}" id="{nid}">'
@@ -183,19 +241,64 @@ def _node_svg(nid: str, label: str, x: int, y: int, kind: str,
     )
 
 
+def _node_svg_flowstep(nid: str, label: str, x: int, y: int,
+                        fill: str, stroke: str, c: dict) -> str:
+    """Diamond shape for flow step nodes."""
+    cx = x + NODE_W // 2
+    cy = y + NODE_H // 2
+    hw = NODE_W // 2
+    hh = NODE_H // 2
+    points = f"{cx},{cy - hh} {cx + hw},{cy} {cx},{cy + hh} {cx - hw},{cy}"
+    return (
+        f'<g class="node node-flowStep" id="{nid}">'
+        f'<polygon class="node-rect" points="{points}" '
+        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>'
+        f'<text class="node-label" x="{cx}" y="{cy + 5}" '
+        f'text-anchor="middle" font-size="12.5" fill="{c["text_main"]}" '
+        f'font-family="{FONT}" font-weight="500">{_esc(label)}</text>'
+        f'</g>'
+    )
+
+
+def _node_svg_system(nid: str, label: str, x: int, y: int,
+                      fill: str, stroke: str, c: dict) -> str:
+    """Rect with 4px-wide left color strip for system nodes."""
+    strip_w = 4
+    return (
+        f'<g class="node node-system" id="{nid}">'
+        f'<rect class="node-rect" x="{x}" y="{y}" width="{NODE_W}" height="{NODE_H}" '
+        f'rx="4" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>'
+        f'<rect class="node-strip" x="{x}" y="{y}" width="{strip_w}" height="{NODE_H}" '
+        f'rx="2" fill="{stroke}"/>'
+        f'<text class="node-label" x="{x + NODE_W // 2}" y="{y + NODE_H // 2 + 5}" '
+        f'text-anchor="middle" font-size="12.5" fill="{c["text_main"]}" '
+        f'font-family="{FONT}" font-weight="500">{_esc(label)}</text>'
+        f'</g>'
+    )
+
+
 # ─── Arrow rendering with SVG markers ────────────────────────────
 def _arrow_line(x1: int, y1: int, x2: int, y2: int,
                 dashed: bool = False, color: str | None = None,
-                colors: dict | None = None) -> str:
+                colors: dict | None = None,
+                relation_type: str | None = None,
+                theme: str = "light") -> str:
     """Draw just the arrow line + marker (no label)."""
     c = colors if colors is not None else C
-    if color is None:
-        color = c["arrow"] if not dashed else c["arrow_muted"]
-    dash = f' stroke-dasharray="5,4"' if dashed else ""
-    marker_id = "arrow-solid" if not dashed else "arrow-dashed"
+    if relation_type and relation_type in ARROW_STYLES:
+        style = _resolve_arrow_style(relation_type, theme)
+        line_color = color or style["color"]
+        dash = f' stroke-dasharray="{style["dash"]}"' if style["dash"] else ""
+        marker_id = style["marker"]
+    else:
+        if color is None:
+            color = c["arrow"] if not dashed else c["arrow_muted"]
+        line_color = color
+        dash = f' stroke-dasharray="5,4"' if dashed else ""
+        marker_id = "arrow-solid" if not dashed else "arrow-dashed"
     return (
         f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
-        f'stroke="{color}" stroke-width="1.5"{dash} '
+        f'stroke="{line_color}" stroke-width="1.5"{dash} '
         f'marker-end="url(#{marker_id})"/>'
     )
 
@@ -299,22 +402,28 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
             columns.append((None, c["id"]))
             used_caps.add(c["id"])
 
-    # Deduplicate columns by system (one column per system, with all its caps)
-    # Group by system
-    sys_columns: dict[str, list[str | None]] = {}  # sys_id → [cap_ids]
-    standalone_caps: list[str] = []
-    for sid, cid in columns:
-        if sid:
-            sys_columns.setdefault(sid, []).append(cid)
-        elif cid:
-            standalone_caps.append(cid)
-
-    # Build ordered column list
+    # Deduplicate: one column per unique capability (prevents vertical stacking)
+    # A system with N capabilities contributes to N columns, but the system node
+    # is placed only in its first column.
     ordered_columns: list[dict] = []
-    for sid in sys_columns:
-        ordered_columns.append({"system": sid, "caps": sys_columns[sid]})
-    for cid in standalone_caps:
-        ordered_columns.append({"system": None, "caps": [cid]})
+    placed_caps: set[str] = set()
+    systems_in_columns: set[str] = set()
+    for sid, cid in columns:
+        if cid is not None and cid not in placed_caps:
+            ordered_columns.append({"system": sid, "caps": [cid]})
+            placed_caps.add(cid)
+            if sid:
+                systems_in_columns.add(sid)
+        elif cid is None and sid:
+            # Orphan system column (no capability)
+            ordered_columns.append({"system": sid, "caps": []})
+            systems_in_columns.add(sid)
+
+    # Add systems whose caps were all claimed by earlier systems
+    for sid, cid in columns:
+        if sid and sid not in systems_in_columns:
+            ordered_columns.append({"system": sid, "caps": []})
+            systems_in_columns.add(sid)
 
     n_cols = len(ordered_columns)
     if n_cols == 0:
@@ -341,9 +450,10 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
     if systems:
         li = len(layer_metas)
         content_y = layer_y + LAYER_HEADER_H + LAYER_PAD
+        placed_systems: set[str] = set()
         for col_idx, col in enumerate(ordered_columns):
             x = start_x + col_idx * (NODE_W + COL_GAP)
-            if col["system"]:
+            if col["system"] and col["system"] not in placed_systems:
                 sys_node = next((s for s in systems if s["id"] == col["system"]), None)
                 if sys_node:
                     nodes[sys_node["id"]] = {
@@ -352,6 +462,7 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
                         "label": sys_node.get("name", sys_node["id"]),
                     }
                     node_layer[sys_node["id"]] = li
+                    placed_systems.add(sys_node["id"])
         layer_metas.append({
             "label": "Application Systems",
             "header_y": layer_y,
@@ -386,16 +497,13 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
     if capabilities:
         li = len(layer_metas)
         content_y = layer_y + LAYER_HEADER_H + LAYER_PAD
-        col_cap_count: dict[int, int] = {}
         for col_idx, col in enumerate(ordered_columns):
             x = start_x + col_idx * (NODE_W + COL_GAP)
             for cid in col["caps"]:
                 cap_node = next((c for c in capabilities if c["id"] == cid), None)
                 if cap_node:
-                    row_in_col = col_cap_count.get(col_idx, 0)
-                    col_cap_count[col_idx] = row_in_col + 1
                     nodes[cid] = {
-                        "x": x, "y": content_y + row_in_col * (NODE_H + 10),
+                        "x": x, "y": content_y,
                         "kind": "capability",
                         "label": cap_node.get("name", cid),
                     }
@@ -410,8 +518,7 @@ def _layout_architecture(blueprint: dict[str, Any]) -> dict:
             "header_y": layer_y,
             "content_y": content_y,
         })
-        max_cap_rows = max(col_cap_count.values(), default=1)
-        layer_y = layer_y + LAYER_HEADER_H + LAYER_PAD + max_cap_rows * (NODE_H + 10) + LAYER_GAP
+        layer_y = layer_y + LAYER_HEADER_H + LAYER_PAD + NODE_H + LAYER_GAP
 
     # ── Row 2: Flow Steps ──
     if flow_steps:
@@ -558,7 +665,7 @@ def _legend_svg(x: int, y: int, colors: dict | None = None) -> str:
         ("流程步骤", c["flow_fill"], c["flow_stroke"], 6),
         ("角色", c["actor_fill"], c["actor_stroke"], 22),
     ]
-    legend_total_h = 30 + len(items) * 22 + 4 + 2 * 22 + 8  # items + gap + arrows + padding
+    legend_total_h = 30 + len(items) * 22 + 4 + 4 * 22 + 8  # items + gap + 4 arrows + padding
     parts = [
         f'<g class="legend" transform="translate({x}, {y})">',
         f'<rect x="0" y="0" width="130" height="{legend_total_h}" '
@@ -576,19 +683,21 @@ def _legend_svg(x: int, y: int, colors: dict | None = None) -> str:
         )
     # Arrow styles
     arrow_y = 38 + len(items) * 22 + 4
-    parts.append(
-        f'<line x1="12" y1="{arrow_y}" x2="30" y2="{arrow_y}" '
-        f'stroke="{c["arrow"]}" stroke-width="1.5" marker-end="url(#arrow-solid)"/>'
-        f'<text x="38" y="{arrow_y + 4}" font-size="9.5" fill="{c["text_sub"]}" '
-        f'font-family="{FONT}">supports</text>'
-    )
-    parts.append(
-        f'<line x1="12" y1="{arrow_y + 22}" x2="30" y2="{arrow_y + 22}" '
-        f'stroke="{c["arrow_muted"]}" stroke-width="1.5" stroke-dasharray="5,4" '
-        f'marker-end="url(#arrow-dashed)"/>'
-        f'<text x="38" y="{arrow_y + 26}" font-size="9.5" fill="{c["text_sub"]}" '
-        f'font-family="{FONT}">flow-to</text>'
-    )
+    arrow_entries = [
+        ("supports", c["arrow"], "", "arrow-solid"),
+        ("depends-on", c["arrow_muted"], ' stroke-dasharray="6,4"', "arrow-open"),
+        ("flows-to", "#60A5FA" if c is C_DARK else "#3B82F6", "", "arrow-solid"),
+        ("owned-by", "#FBBF24" if c is C_DARK else "#D97706", ' stroke-dasharray="3,3"', "arrow-dot"),
+    ]
+    for i, (label, acolor, dash_attr, marker) in enumerate(arrow_entries):
+        ay = arrow_y + i * 22
+        parts.append(
+            f'<line x1="12" y1="{ay}" x2="30" y2="{ay}" '
+            f'stroke="{acolor}" stroke-width="1.5"{dash_attr} '
+            f'marker-end="url(#{marker})"/>'
+            f'<text x="38" y="{ay + 4}" font-size="9.5" fill="{c["text_sub"]}" '
+            f'font-family="{FONT}">{label}</text>'
+        )
     parts.append('</g>')
     return "\n".join(parts)
 
@@ -618,23 +727,35 @@ def _svg_defs(colors: dict | None = None, theme: str = "light") -> str:
         f'refX="4" refY="3" orient="auto" markerUnits="userSpaceOnUse">'
         f'<polygon points="0 0, 8 3, 0 6" fill="{c["arrow_muted"]}"/>'
         f'</marker>'
+        f'<marker id="arrow-open" markerWidth="8" markerHeight="6" '
+        f'refX="4" refY="3" orient="auto" markerUnits="userSpaceOnUse">'
+        f'<polygon points="0 0, 8 3, 0 6" fill="none" stroke="{c["arrow_muted"]}" stroke-width="1"/>'
+        f'</marker>'
+        f'<marker id="arrow-dot" markerWidth="8" markerHeight="8" '
+        f'refX="4" refY="4" orient="auto" markerUnits="userSpaceOnUse">'
+        f'<circle cx="4" cy="4" r="3" fill="{c["arrow"]}"/>'
+        f'</marker>'
         '</defs>'
     )
 
 
 # ─── Main export ─────────────────────────────────────────────────
-def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light") -> None:
+def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light",
+               industry: str | None = None) -> None:
     """Export architecture diagram to SVG.
 
     Args:
         blueprint: The canonical blueprint JSON.
         target: Output file path.
         theme: Color theme — "light" (default) or "dark".
+        industry: Industry theme for accent colors. Auto-detected from blueprint meta if None.
     """
-    colors = _resolve_theme(theme)
+    if industry is None:
+        industry = blueprint.get("meta", {}).get("industry", "") or None
+    colors = _resolve_theme(theme, industry=industry)
     title = blueprint.get("meta", {}).get("title", "Business Blueprint")
-    industry = blueprint.get("meta", {}).get("industry", "")
-    subtitle = f"行业：{industry}" if industry else "应用架构"
+    industry_label = industry or blueprint.get("meta", {}).get("industry", "")
+    subtitle = f"行业：{industry_label}" if industry_label else "应用架构"
 
     layout = _layout_architecture(blueprint)
     w, h = layout["width"], layout["height"]
@@ -670,6 +791,11 @@ def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light") ->
         systems_by_id[s["id"]] = s
 
     # Arrows (z-order: behind nodes, above layer backgrounds)
+    # Build relation type lookup from blueprint relations
+    relations_by_endpoints: dict[tuple[str, str], str] = {}
+    for rel in blueprint.get("relations", []):
+        relations_by_endpoints[(rel["from"], rel["to"])] = rel.get("type", "supports")
+
     # Pass 1: draw all lines
     arrow_labels: list[tuple[int, int, str]] = []
     for arrow in layout["arrows"]:
@@ -677,19 +803,22 @@ def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light") ->
         tgt = layout["nodes"].get(arrow["to"])
         if not src or not tgt:
             continue
-        # Skip arrows between different columns that would cross
+        # Skip cross-layer diagonal arrows that would cross many columns
         start_x = layout.get("start_x", CANVAS_X + LAYER_PAD)
         src_col = (src["x"] - start_x) // (NODE_W + COL_GAP) if COL_GAP else 0
         tgt_col = (tgt["x"] - start_x) // (NODE_W + COL_GAP) if COL_GAP else 0
-        if abs(src_col - tgt_col) > 0 and arrow.get("label") == "supports":
+        if abs(src_col - tgt_col) > 2 and arrow.get("label") == "supports":
             continue
         sx, sy = _node_center(src)
         tx, ty = _node_center(tgt)
         sx, sy = _edge_point(src, tx, ty)
         tx, ty = _edge_point(tgt, sx, sy)
+        # Look up relation type for semantic arrow style
+        rel_type = relations_by_endpoints.get((arrow["from"], arrow["to"]))
         parts.append(
             _arrow_line(sx, sy, tx, ty,
-                        dashed=arrow.get("dashed", False), colors=colors)
+                        dashed=arrow.get("dashed", False), colors=colors,
+                        relation_type=rel_type, theme=theme)
         )
         if arrow.get("label"):
             mx = (sx + tx) // 2
@@ -1218,7 +1347,7 @@ def _layout_free_flow(blueprint: dict[str, Any]) -> dict[str, Any]:
         # Otherwise arrow to the first main flow system on MAIN_Y
         arrows.append({"from": "clients", "to": first_main_sid, "dashed": False, "label": ""})
 
-    # Deduplicate arrows
+    # Deduplicate arrows (prefer relations over synthetic ones)
     seen_pairs: set[tuple[str, str]] = set()
     unique_arrows = []
     for a in arrows:
@@ -1226,9 +1355,30 @@ def _layout_free_flow(blueprint: dict[str, Any]) -> dict[str, Any]:
         if key not in seen_pairs:
             seen_pairs.add(key)
             unique_arrows.append(a)
+        elif a.get("relation_type"):
+            # Upgrade existing synthetic arrow to typed relation arrow
+            for i, existing in enumerate(unique_arrows):
+                if (existing["from"], existing["to"]) == key:
+                    unique_arrows[i] = a
+                    break
     arrows = unique_arrows
 
-    # ── Step 9b: Add dashed support arrows from non-main-flow to main flow ──
+    # ── Step 9b: Add arrows from blueprint relations ──
+    # System-to-system relations where both endpoints exist as nodes
+    for rel in blueprint.get("relations", []):
+        src_id = rel.get("from", "")
+        tgt_id = rel.get("to", "")
+        rel_type = rel.get("type", "supports")
+        if src_id in nodes and tgt_id in nodes:
+            dashed = rel_type in ("depends-on", "owned-by")
+            arrows.append({
+                "from": src_id, "to": tgt_id,
+                "dashed": dashed,
+                "label": rel.get("label", ""),
+                "relation_type": rel_type,
+            })
+
+    # ── Step 9c: Add dashed support arrows from non-main-flow to main flow ──
     # Generic: link auxiliary systems to their related main-flow systems
     # based on shared capabilities and flow step associations
     for s in systems:
@@ -1421,7 +1571,8 @@ def _render_free_flow_svg(
     """Render a free-flow layout dict into an SVG string."""
     if blueprint is None:
         blueprint = {}
-    colors = _resolve_theme(theme)
+    industry = blueprint.get("meta", {}).get("industry", "") or None
+    colors = _resolve_theme(theme, industry=industry)
     nodes = layout["nodes"]
     arrows = layout["arrows"]
     w, h = layout["width"], layout["height"]
@@ -1460,14 +1611,16 @@ def _render_free_flow_svg(
                 f'letter-spacing="0.3">{_esc(layer)}</text>'
             )
 
-    # Detect boundary box for non-external systems
-    inner_nodes = [n for n in nodes.values() if n.get("category") != "external"]
+    # Detect boundary box covering all non-client nodes
+    all_rendered_nodes = [n for n in nodes.values() if n.get("category") != "external" or n.get("sys", {}).get("id", "").startswith("sys-")]
+    if not all_rendered_nodes:
+        all_rendered_nodes = [n for n in nodes.values() if n.get("category") != "external"]
     region_rect_idx = None
-    if inner_nodes:
-        min_x = min(n["x"] for n in inner_nodes) - 40
-        region_min_y = max(min(n["y"] for n in inner_nodes) - 30 + y_offset, 72)
-        max_x = max(n["x"] + n["w"] for n in inner_nodes) + 40
-        region_max_y = max(n["y"] + n["h"] for n in inner_nodes) + 60 + y_offset
+    if all_rendered_nodes:
+        min_x = min(n["x"] for n in all_rendered_nodes) - 40
+        region_min_y = max(min(n["y"] for n in all_rendered_nodes) - 30 + y_offset, 72)
+        max_x = max(n["x"] + n["w"] for n in all_rendered_nodes) + 40
+        region_max_y = max(n["y"] + n["h"] for n in all_rendered_nodes) + 30 + y_offset
         region_rect_idx = len(parts)
         parts.append(
             f'<rect x="{min_x}" y="{region_min_y}" width="{max_x-min_x}" height="{region_max_y-region_min_y}" '
@@ -1529,12 +1682,8 @@ def _render_free_flow_svg(
         # Use spread x for target attachment if available
         spread_tx = target_attach_x.get((arrow["to"], ai), tgt["x"] + tgt["w"] // 2)
 
-        # If spread shifts the target x, it's no longer a simple same_col vertical
-        truly_vertical = same_col and abs(spread_tx - (src["x"] + src["w"] // 2)) < 8
-
-        if truly_vertical:
-            # Vertical: bottom of upper node → top of lower node
-            # 强制对齐 x 坐标，避免轻微倾斜
+        # Same-column connections always use vertical path (no elbow detour)
+        if same_col:
             center_x = (src["x"] + src["w"] // 2 + spread_tx) // 2
             if src["y"] < tgt["y"]:
                 sx = center_x
@@ -1677,11 +1826,17 @@ def _render_free_flow_svg(
     for nid, n in nodes.items():
         cat = n.get("category", "external")
         fill, stroke = _resolve_system_colors(cat, theme)
+        if not fill:
+            fill, stroke = colors["sys_fill"], colors["sys_stroke"]
         rx = 8
         ny = n["y"] + y_offset
         parts.append(f'<g class="node" id="{nid}">')
         parts.append(f'<rect x="{n["x"]}" y="{ny}" width="{n["w"]}" height="{n["h"]}" '
                      f'rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>')
+        # Category strip (4px left edge)
+        if stroke:
+            parts.append(f'<rect x="{n["x"]}" y="{ny}" width="4" height="{n["h"]}" '
+                         f'rx="2" fill="{stroke}"/>')
         # Label
         subs = n.get("subtitles", [])
         label_y = ny + n["h"] // 2 - (len(subs) + 1) * 7
@@ -1716,7 +1871,7 @@ def _render_free_flow_svg(
     cat_samples = [(c, _CAT_LABELS.get(c, c)) for c in used_cats if c != "external"]
     ROW_H = 18
     legend_w = 160
-    legend_h = 20 + len(cat_samples) * ROW_H + 6 + 2 * ROW_H + 10
+    legend_h = 20 + len(cat_samples) * ROW_H + 6 + 4 * ROW_H + 10
     legend_x, legend_y = 40, h - legend_h - 12
 
     legend_parts = [
@@ -1737,17 +1892,20 @@ def _render_free_flow_svg(
             f'<text x="30" y="{cy+10}" font-size="9" fill="{colors["text_sub"]}">{label}</text>'
         )
     arrow_base_y = 28 + len(cat_samples) * ROW_H + 6
-    legend_parts.append(
-        f'<line x1="12" y1="{arrow_base_y+6}" x2="30" y2="{arrow_base_y+6}" '
-        f'stroke="{colors["arrow"]}" stroke-width="1.5"/>'
-        f'<text x="38" y="{arrow_base_y+10}" font-size="9" fill="{colors["text_sub"]}">数据流</text>'
-    )
-    legend_parts.append(
-        f'<line x1="12" y1="{arrow_base_y+ROW_H+6}" x2="30" y2="{arrow_base_y+ROW_H+6}" '
-        f'stroke="{colors["arrow_muted"]}" stroke-width="1.5" stroke-dasharray="4,4" opacity="0.5" '
-        f'marker-end="url(#arrow-dashed)"/>'
-        f'<text x="38" y="{arrow_base_y+ROW_H+10}" font-size="9" fill="{colors["text_sub"]}">支撑 / 依赖</text>'
-    )
+    legend_arrows = [
+        ("supports", colors["arrow"], "", "arrow-solid"),
+        ("depends-on", colors["arrow_muted"], ' stroke-dasharray="6,4"', "arrow-open"),
+        ("flows-to", "#60A5FA" if theme == "dark" else "#3B82F6", "", "arrow-solid"),
+        ("owned-by", "#FBBF24" if theme == "dark" else "#D97706", ' stroke-dasharray="3,3"', "arrow-dot"),
+    ]
+    for i, (label, acolor, dash_attr, marker) in enumerate(legend_arrows):
+        ay = arrow_base_y + i * ROW_H
+        legend_parts.append(
+            f'<line x1="12" y1="{ay + 6}" x2="30" y2="{ay + 6}" '
+            f'stroke="{acolor}" stroke-width="1.5"{dash_attr} '
+            f'marker-end="url(#{marker})"/>'
+            f'<text x="38" y="{ay + 10}" font-size="9" fill="{colors["text_sub"]}">{label}</text>'
+        )
     legend_parts.append('</g>')
     # Insert legend at the recorded position (behind arrows & nodes)
     for i, lp in enumerate(legend_parts):
@@ -1765,7 +1923,8 @@ def _render_free_flow_svg(
     return "\n".join(parts)
 
 
-def export_svg_auto(blueprint: dict[str, Any], target: Path, theme: str = "dark") -> None:
+def export_svg_auto(blueprint: dict[str, Any], target: Path, theme: str = "dark",
+                    industry: str | None = None) -> None:
     """Export using free-flow L→R data flow layout.
 
     This is the default export: positions systems by category in columns
@@ -1773,8 +1932,10 @@ def export_svg_auto(blueprint: dict[str, Any], target: Path, theme: str = "dark"
     When systems have ``layer`` fields, uses _layout_layered instead.
     """
     title = blueprint.get("meta", {}).get("title", "Business Blueprint")
-    industry = blueprint.get("meta", {}).get("industry", "")
-    subtitle = f"行业：{industry}" if industry else "架构"
+    if industry is None:
+        industry = blueprint.get("meta", {}).get("industry", "") or None
+    industry_label = industry or ""
+    subtitle = f"行业：{industry_label}" if industry_label else "架构"
 
     # Detect layer-based layout
     systems = blueprint.get("library", {}).get("systems", [])

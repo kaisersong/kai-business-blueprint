@@ -13,7 +13,6 @@ All generated files (blueprint JSON, viewers, exports) go into `projects/workspa
 
 ```bash
 python -m business_blueprint.cli --plan projects/workspace/solution.blueprint.json --from "..."
-python -m business_blueprint.cli --generate projects/workspace/solution.blueprint.json
 python -m business_blueprint.cli --export projects/workspace/solution.blueprint.json
 ```
 
@@ -21,29 +20,93 @@ python -m business_blueprint.cli --export projects/workspace/solution.blueprint.
 
 Choose `--industry` from exactly one of: `"common"`, `"finance"`, `"manufacturing"`, `"retail"`. Select the closest match based on the user's domain and materials; do not invent other values.
 
-| Industry | Seed content |
+| Industry | Hints content |
 |----------|-------------|
-| `common` | Empty skeleton — generic domains |
-| `finance` | Risk control, credit approval, compliance, customer profile |
-| `manufacturing` | Production planning, quality inspection, warehouse, supply chain |
-| `retail` | Store operations, membership, POS, order fulfillment |
+| `common` | No hints — generic domains |
+| `finance` | Risk control, credit, compliance, customer profile, etc. |
+| `manufacturing` | Production planning, quality, warehouse, supply chain, etc. |
+| `retail` | Store operations, membership, POS, order fulfillment, etc. |
 
-Available templates live under `business_blueprint/templates/{industry}/seed.json`.
-Passing an unrecognized value (e.g. `"software"`) will fail at runtime.
+## How to Generate a Blueprint
+
+The AI agent is responsible for entity extraction. The Python tool handles JSON writing, visualization, and export.
+
+### Step 1: Read industry hints
+
+Read the seed template at `business_blueprint/templates/{industry}/seed.json` and get the `industryHints.checklist`.
+
+### Step 2: Extract entities from source text
+
+Using the user's source material AND the industry hints checklist, extract:
+- **capabilities**: business capability areas (name, description)
+- **actors**: roles/people involved (name)
+- **flowSteps**: business process steps (name, actorId, capabilityIds, stepType)
+- **systems**: IT systems that support capabilities (name, description, capabilityIds)
+
+### Step 3: Write the blueprint JSON
+
+Write the JSON file directly to the output path. Use this schema:
+
+```json
+{
+  "version": "1.0",
+  "meta": {
+    "title": "...",
+    "industry": "retail",
+    "revisionId": "rev-YYYYMMDD-NN",
+    "parentRevisionId": null,
+    "lastModifiedAt": "ISO8601",
+    "lastModifiedBy": "ai"
+  },
+  "context": {
+    "goals": [],
+    "scope": [],
+    "assumptions": [],
+    "constraints": [],
+    "sourceRefs": [{"type": "inline-text", "excerpt": "..."}],
+    "clarifyRequests": [],
+    "clarifications": []
+  },
+  "library": {
+    "capabilities": [
+      {"id": "cap-xxx", "name": "...", "level": 1, "description": "...", "ownerActorIds": [], "supportingSystemIds": []}
+    ],
+    "actors": [
+      {"id": "actor-xxx", "name": "..."}
+    ],
+    "flowSteps": [
+      {"id": "flow-xxx", "name": "...", "actorId": "actor-xxx", "capabilityIds": ["cap-xxx"], "systemIds": [], "stepType": "task", "inputRefs": [], "outputRefs": []}
+    ],
+    "systems": [
+      {"id": "sys-xxx", "kind": "system", "name": "...", "aliases": [], "description": "...", "resolution": {"status": "canonical", "canonicalName": "..."}, "capabilityIds": ["cap-xxx"]}
+    ]
+  },
+  "relations": [
+    {"id": "rel-xxx", "type": "supports", "from": "sys-xxx", "to": "cap-xxx", "label": "支撑"}
+  ],
+  "views": [],
+  "editor": {"fieldLocks": {}, "theme": "enterprise-default"},
+  "artifacts": {}
+}
+```
+
+### Step 4: Generate visualizations
+
+```bash
+python -m business_blueprint.cli --export <blueprint.json>
+```
+
+This generates SVG + HTML viewer by default. Use `--format drawio|excalidraw|mermaid` for other formats.
 
 ## Workflow Decision Tree
 
 ```
 User provides raw requirements / meeting notes?
-  → Does a canonical blueprint JSON already exist?
-    → No:  --plan (generate JSON only)
-    → Yes: --generate (JSON + viewer refresh)
-
-User has an existing blueprint JSON to modify?
-  → --edit (refresh viewer only)
+  → AI agent reads hints, extracts entities, writes blueprint JSON
+  → Then run --export for visualization
 
 User needs diagram files (SVG, draw.io, etc.)?
-  → --validate first, then --export
+  → --export (default: SVG + HTML viewer)
 
 User unsure about blueprint quality?
   → --validate
@@ -51,27 +114,20 @@ User unsure about blueprint quality?
 
 ## Commands
 
-1. Use `--plan` when starting from raw source material and no canonical blueprint exists yet.
-2. Use `--generate` after a canonical blueprint exists and the user needs the static viewer package.
-3. Use `--edit` to refresh the viewer for an existing blueprint revision.
-4. Use `--validate` before claiming a blueprint is complete.
-5. Use `--export` when downstream skills need SVG, draw.io, Excalidraw, or Mermaid artifacts.
-
-## Handoff Rules
-
-- Treat `solution.blueprint.json` as the only source of truth.
-- Never treat `solution.viewer.html` as the source of truth.
-- Preserve `editor.fieldLocks` and human-edited fields during regeneration.
-- If `context.clarifyRequests` is non-empty, surface them instead of pretending the blueprint is complete.
+| Command | Description |
+|---------|-------------|
+| `--plan <path> --from <text>` | Generate empty blueprint JSON from source text (AI should prefer writing JSON directly) |
+| `--export <path>` | Export SVG + HTML viewer (default), or use `--format` for other formats |
+| `--validate <path>` | Validate a blueprint and print JSON results |
 
 ## Export Formats
 
 | Format | File | Use Case |
 |--------|------|----------|
-| SVG | `solution.exports/solution.svg` | Quick preview, embedding |
-| draw.io | `solution.exports/solution.drawio` | Editable diagrams |
-| Excalidraw | `solution.exports/solution.excalidraw` | Whiteboard-style diagrams |
-| Mermaid | `solution.exports/solution.mermaid.md` | GitHub-native rendering |
+| `svg` (default) | `solution.exports/solution.svg` + HTML viewer | Quick preview, embedding |
+| `drawio` | `solution.exports/solution.drawio` | Editable diagrams |
+| `excalidraw` | `solution.exports/solution.excalidraw` | Whiteboard-style diagrams |
+| `mermaid` | `solution.exports/solution.mermaid.md` | GitHub-native rendering |
 
 ## Collaboration Boundary
 
@@ -88,51 +144,22 @@ When running in an isolated Python sandbox (Jupyter, notebook, cloud REPL) that 
 
 1. **The sandbox auto-installs `business-blueprint-skill` from PyPI.** Do NOT try to `pip install -e` or use `sys.path` hacks with `__file__` — `__file__` is undefined in Jupyter.
 
-2. **After auto-install, run code like this — copy exactly:**
-   ```python
-   from business_blueprint.cli import main
-   import sys
-   sys.argv = [
-       "business-blueprint",
-       "--plan",
-       "solution.blueprint.json",
-       "--from",
-       "your source text or requirements here",
-       "--industry",
-       "common"
-   ]
-   main()
-   ```
-
-3. **For `--generate` (after blueprint JSON exists):**
-   ```python
-   from pathlib import Path
-   from business_blueprint.generate import write_plan_output
-   source_text = "your source text"
-   output_path = Path("solution.blueprint.json")
-   write_plan_output(output_path, source_text, "common", Path.cwd())
-   ```
-
-4. **For `--export` (after blueprint JSON exists):**
+2. **For `--export` (after blueprint JSON exists):**
    ```python
    from pathlib import Path
    from business_blueprint.model import load_json
-   from business_blueprint.export_svg import export_svg
-   from business_blueprint.export_drawio import export_drawio
-   from business_blueprint.export_excalidraw import export_excalidraw
-   from business_blueprint.export_mermaid import export_mermaid
+   from business_blueprint.export_svg import export_svg_auto
+   from business_blueprint.export_html import export_html_viewer
 
    blueprint_path = Path("solution.blueprint.json")
    blueprint = load_json(blueprint_path)
    export_dir = blueprint_path.with_name("solution.exports")
    export_dir.mkdir(parents=True, exist_ok=True)
-   export_svg(blueprint, export_dir / "solution.svg")
-   export_drawio(blueprint, export_dir / "solution.drawio")
-   export_excalidraw(blueprint, export_dir / "solution.excalidraw")
-   export_mermaid(blueprint, export_dir / "solution.mermaid.md")
+   export_svg_auto(blueprint, export_dir / "solution.svg")
+   export_html_viewer(blueprint, blueprint_path.with_name("solution.blueprint.html"))
    ```
 
-5. **Prohibited patterns in sandbox:**
+3. **Prohibited patterns in sandbox:**
    - `__file__` — undefined in Jupyter
    - `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` — will raise NameError
    - `subprocess.run(["business-blueprint", ...])` — sandbox runs Python cells, not shell
@@ -170,7 +197,6 @@ When user requests an architecture diagram (keywords: "架构图", "architecture
 
 ## Error Handling
 
-- If source text is too ambiguous to extract any entities: run `--plan` with minimal output, then surface `clarifyRequests`.
 - If `--validate` returns errors: fix structural issues before proceeding to `--export`.
 - If `--validate` returns only warnings: proceed but note the warnings in any handoff.
 - If Python version < 3.12: the package will refuse to install. Use `python3 -m business_blueprint.cli` with system Python as fallback.

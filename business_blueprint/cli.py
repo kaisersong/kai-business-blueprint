@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validate", help="Validate a blueprint and print JSON results.")
     parser.add_argument("--from", dest="from_path", help="Source text or file path.")
     parser.add_argument("--format", dest="export_format", default="svg",
-                        help="Export format: svg/auto (default: free-flow SVG+HTML), drawio, excalidraw, mermaid, all.")
+                        help="Export format: svg (default: SVG + HTML viewer), drawio, excalidraw, mermaid.")
     _INDUSTRIES = ["common", "finance", "manufacturing", "retail"]
     parser.add_argument("--industry", default="common", choices=_INDUSTRIES,
                         help=f"Template pack name ({', '.join(_INDUSTRIES)}).")
@@ -48,6 +48,10 @@ def main() -> int:
         # 如果 --from 未提供且存在 stdin 数据，则从 stdin 读取
         if not source_text and not args.from_path and not sys.stdin.isatty():
             source_text = sys.stdin.read()
+        if not source_text.strip():
+            print("Error: --plan requires source text. Provide it via --from <text> or pipe from stdin.", file=sys.stderr)
+            print("Example: business-blueprint --plan output.json --from \"My requirements here\"", file=sys.stderr)
+            return 1
         write_plan_output(Path(args.plan), source_text, args.industry, Path.cwd())
         return 0
 
@@ -92,17 +96,8 @@ def main() -> int:
             export_excalidraw(blueprint, export_dir / "solution.excalidraw")
         elif fmt == "mermaid":
             export_mermaid(blueprint, export_dir / "solution.mermaid.md")
-        elif fmt == "auto":
-            export_svg_auto(blueprint, export_dir / "solution.auto.svg", theme=args.theme)
-            export_html_viewer(blueprint, html_path, theme=args.theme)
-        elif fmt == "all":
-            export_svg_auto(blueprint, export_dir / "solution.svg", theme=args.theme)
-            export_html_viewer(blueprint, html_path, theme=args.theme)
-            export_drawio(blueprint, export_dir / "solution.drawio")
-            export_excalidraw(blueprint, export_dir / "solution.excalidraw")
-            export_mermaid(blueprint, export_dir / "solution.mermaid.md")
         else:
-            print(f"Unknown format: {fmt}. Supported: svg, drawio, excalidraw, mermaid, auto, all")
+            print(f"Unknown format: {fmt}. Supported: svg (default), drawio, excalidraw, mermaid", file=sys.stderr)
             return 1
         return 0
 
