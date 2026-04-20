@@ -140,7 +140,9 @@ The SVG export renders a free-flow L→R architecture diagram:
 - **Main flow chain** (center row) — systems connected via flow steps, left to right
 - **Auxiliary systems** (rows above/below) — placed by category (database, security, cloud)
 - **Entry node** (left) — auto-generated from blueprint actors
-- **Arrows** — solid lines for data flow, dashed for support/dependency; cross-row elbows route below source nodes with collision avoidance
+- **Semantic arrows** — 4 types with distinct colors/markers: `supports` (green solid), `depends-on` (gray dashed), `flows-to` (blue solid), `owned-by` (yellow dotted)
+- **Semantic node shapes** — diamond for flow steps, left color strip for systems, rounded rects for capabilities, pill shapes for actors
+- **Industry themes** — accent color overlays for retail (orange), finance (blue), manufacturing (gray)
 
 The layout engine computes positions dynamically with overlap resolution, horizontal alignment, and mid-y collision avoidance. The region boundary box and SVG canvas auto-expand to contain all arrow paths.
 
@@ -243,6 +245,8 @@ for rel in bp["relations"]:
 ---
 
 ## Version History
+
+**v0.7.0** — Visual enhancements: 4 semantic arrow types (supports/depends-on/flows-to/owned-by) with distinct colors, dash patterns, and SVG markers; semantic node shapes (diamond for flowStep, left color strip for systems, rounded rects for capabilities, pill for actors); 3 industry theme overlays (retail=#F97316, finance=#3B82F6, manufacturing=#6B7280); HTML template-driven viewer generation (replaces 244 lines of f-strings); architecture layout fix — one column per unique capability; free-flow now renders full relation arrows from `blueprint.relations`; same-column arrow routing uses direct vertical paths; region box covers all system nodes; 46 new tests.
 
 **v0.6.1** — Layout engine genericization: remove all hardcoded company/product names (AWS service mappings, Kingdee product IDs, brand text) from layout and rendering code; `_categorize_system()` now uses language-agnostic keyword matching (Chinese + English); `_layout_layered()` assigns distinct colors per layer instead of category keyword lookup; dark theme node colors increased contrast (brighter fills, bolder strokes); legend rendered behind arrows and nodes (z-order fix) so overlaps never obscure content; product tree and capability matrix auto-derive segments from blueprint data instead of hardcoded IDs.
 
