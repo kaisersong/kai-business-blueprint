@@ -94,6 +94,13 @@ cd kai-business-blueprint && pip install -e .
 | `--theme <dark|light>` | Color theme for output (default: dark) |
 | `--format <fmt>` | Export format: svg, drawio, excalidraw, mermaid, all |
 
+### Export Quality Contracts
+
+- Export routing is explicit: specialized views are only used when the blueprint structure clearly matches them; otherwise the exporter stays on `freeflow`.
+- SVG output now runs structural integrity checks for missing defs references and basic canvas overflow before an artifact is accepted.
+- Export thresholds and defect taxonomy live under [`evals/`](evals), so route and integrity behavior are backed by machine-readable fixtures rather than prose only.
+- Windows/terminal support is intentionally scoped: the canonical path is `python -m business_blueprint.cli`, and encoding-sensitive runs should use `PYTHONIOENCODING=utf-8` when needed.
+
 ### Typical Workflows
 
 **From raw text:**
@@ -169,6 +176,10 @@ kai-business-blueprint/
 │   ├── clarify.py                # Clarification request builder
 │   ├── normalize.py              # Entity resolution & synonym merging
 │   ├── viewer.py                 # HTML viewer package writer
+│   ├── export_theme.py           # Shared export theme tokens and semantic colors
+│   ├── export_text.py            # Shared SVG text width + wrapping helpers
+│   ├── export_routes.py          # Explicit export route resolution
+│   ├── export_integrity.py       # Structural export integrity checks + diagnostics
 │   ├── export_svg.py             # SVG exporter (two-pass layout, content router, free-flow)
 │   ├── export_drawio.py          # draw.io exporter
 │   ├── export_excalidraw.py      # Excalidraw exporter
@@ -259,6 +270,8 @@ for rel in bp["relations"]:
 ---
 
 ## Version History
+
+**v0.10.0** — Quality hardening release: add explicit export route resolution and SVG integrity checks with structured fallback diagnostics; introduce machine-readable eval assets under `evals/` (thresholds, defect taxonomy, route fixtures, scoring schema); improve cross-platform CLI handling for spaced paths, CRLF input, and UTF-8 validation output; split shared export text/theme helpers out of `export_svg.py`; and refine the evolution timeline view so dark cards stay readable and wrapped system pills no longer overflow.
 
 **v0.9.0** — Canonical projection release: add `solution.projection.json` generation via `--project`; formalize prompt-native orchestration templates for report/slide downstream skills; strengthen export routing rules so non-standard diagram requests fall back to free-flow; and ship substantial SVG quality upgrades across poster, swimlane, hierarchy, and evolution views, including dark-theme fixes, label collision handling, width-aware title wrapping, centered card rows, and new regression coverage.
 

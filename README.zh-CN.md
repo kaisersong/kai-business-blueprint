@@ -91,6 +91,13 @@ cd kai-business-blueprint && pip install -e .
 | `--from <文件>` | 从指定文件读取源材料 |
 | `--industry <包名>` | 指定行业模板包（默认：`common`） |
 
+### 导出质量契约
+
+- 导出路由现在是显式决策：只有当蓝图结构明确匹配某个专用视图时才会切过去，否则默认停在 `freeflow`。
+- SVG 输出在落盘前会做结构完整性检查，先覆盖缺失 defs 引用和基础画布越界。
+- 导出阈值和缺陷分类放在 [`evals/`](evals) 下，用 machine-readable 资产支撑 route 和 integrity 行为，而不是只靠文字说明。
+- Windows / 终端支持是收敛范围的：推荐统一走 `python -m business_blueprint.cli`，遇到编码敏感场景时显式设置 `PYTHONIOENCODING=utf-8`。
+
 ### 典型工作流
 
 **从原始文本开始：**
@@ -167,6 +174,10 @@ kai-business-blueprint/
 │   ├── clarify.py                # 澄清请求构建器
 │   ├── normalize.py              # 实体解析与同义词合并
 │   ├── viewer.py                 # HTML 查看器写入器
+│   ├── export_theme.py           # 共享导出主题 token 与语义颜色
+│   ├── export_text.py            # 共享 SVG 文本测宽与换行 helper
+│   ├── export_routes.py          # 显式导出路由决策
+│   ├── export_integrity.py       # 导出结构完整性检查与 diagnostics
 │   ├── export_svg.py             # SVG 导出器（两遍布局、内容路由、自由流式布局）
 │   ├── export_drawio.py          # draw.io 导出器
 │   ├── export_excalidraw.py      # Excalidraw 导出器
@@ -257,6 +268,8 @@ for rel in bp["relations"]:
 ---
 
 ## 版本日志
+
+**v0.10.0** — 质量加固发布：新增显式导出路由决策与 SVG 完整性检查，并在 fallback 失败时返回结构化 diagnostics；补齐 `evals/` 下的 machine-readable 评测资产（阈值、缺陷分类、路由 fixture、评分 schema）；增强 CLI 对带空格路径、CRLF 输入和 UTF-8 校验输出的跨平台兼容；将共享导出文本/主题 helper 从 `export_svg.py` 中拆出；并修正演进时间线在暗黑主题下的卡片底色与多胶囊换行溢出问题。
 
 **v0.9.0** — Canonical projection 发布：新增 `--project` 生成 `solution.projection.json`；补齐面向 report/slide 下游 skill 的 prompt-native 编排模板；明确非标准图形默认回退 `freeflow`；并完成一整轮 SVG 导出质量升级，覆盖海报图、泳道图、层次图、演进图，包括暗黑主题修复、标签避让、按宽度换行、卡片居中和新增回归测试。
 

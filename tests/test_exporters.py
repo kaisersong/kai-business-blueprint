@@ -104,6 +104,62 @@ def test_export_evolution_timeline_svg_gives_cangqiong_pill_enough_width(tmp_pat
     assert float(match.group(1)) >= 78
 
 
+def test_export_evolution_timeline_svg_uses_dark_card_fills_in_dark_theme(tmp_path: Path) -> None:
+    target = tmp_path / "evolution.svg"
+    export_evolution_timeline_svg(TIMELINE_BLUEPRINT, target, theme="dark")
+    svg = target.read_text(encoding="utf-8")
+
+    assert 'fill="#FEF2F2"' not in svg
+    assert 'fill="#EEF2FF"' not in svg
+    assert 'stroke="#DC2626" stroke-width="2"/>' in svg
+    assert 'stroke="#4338CA" stroke-width="2"/>' in svg
+
+
+def test_export_evolution_timeline_svg_grows_card_for_wrapped_system_pills(tmp_path: Path) -> None:
+    blueprint = {
+        "meta": {"title": "Timeline", "industry": "common"},
+        "library": {
+            "capabilities": [
+                {"id": "cap-1", "name": "Harness基础能力"},
+                {"id": "cap-2", "name": "Agent运行时"},
+            ],
+            "actors": [
+                {"id": "actor-1", "name": "平台工程师"},
+            ],
+            "flowSteps": [
+                {
+                    "id": "flow-1",
+                    "name": "阶段 1：Harness支撑层完成Agent调度、工具调用与接口治理",
+                    "actorId": "actor-1",
+                    "capabilityIds": ["cap-1", "cap-2"],
+                    "systemIds": ["sys-core", "sys-integration"],
+                }
+            ],
+            "systems": [
+                {"id": "sys-core", "name": "Harness核心能力", "capabilityIds": ["cap-1"]},
+                {"id": "sys-integration", "name": "Harness集成能力", "capabilityIds": ["cap-2"]},
+            ],
+        },
+    }
+    target = tmp_path / "evolution.svg"
+    export_evolution_timeline_svg(blueprint, target, theme="dark")
+    svg = target.read_text(encoding="utf-8")
+
+    card_match = re.search(r'<rect x="[^"]+" y="210" width="260" height="([^"]+)" rx="18" fill="[^"]+" stroke="#34D399" stroke-width="2"/>', svg)
+    assert card_match is not None
+    card_height = float(card_match.group(1))
+
+    pill_ys = [
+        float(y)
+        for y in re.findall(
+            r'<rect x="[^"]+" y="([^"]+)" width="[^"]+" height="22" rx="11" fill="#0F172A" fill-opacity="0\.96" stroke="#34D399" stroke-width="1"/>',
+            svg,
+        )
+    ]
+    assert len(pill_ys) >= 2
+    assert max(pill_ys) + 22 <= 210 + card_height
+
+
 POSTER_BLUEPRINT = {
     "meta": {"title": "云之家 V12 产品蓝图", "industry": "common"},
     "library": {

@@ -128,6 +128,26 @@ Clients(左) → Frontend → Backend → Database(右)
 - 禁止使用 `overflow: hidden` 裁掉最后一层、legend 或 summary cards。
 - 如果模板内容超出当前画布，应增加画布高度或改为多行布局，而不是截断。
 
+### 4.8 完整性阈值
+
+所有几何类完整性检查必须使用阈值配置，而不是凭渲染器里的临时经验判断。
+
+阈值来源：
+- `evals/export-integrity-thresholds.json`
+
+最小阈值集合：
+- `minLabelClearancePx`
+- `legendBottomMarginPx`
+- `legendContentGapPx`
+- `titleOverflowTolerancePx`
+- `cardTextInsetPx`
+
+只要是以下检查，都必须绑定到阈值：
+- label 与折线拐点、卡片边界的最小安全距离
+- legend 与底部/内容区的安全距离
+- 标题文本的溢出容忍度
+- 卡片正文与边框的内边距
+
 ## 5. 视觉元素
 
 ### 5.1 箭头

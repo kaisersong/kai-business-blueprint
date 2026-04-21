@@ -16,177 +16,20 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
+from .export_integrity import ExportIntegrityError, ExportIntegrityFailure, check_svg_integrity
+from .export_routes import resolve_export_route
+from .export_text import estimate_svg_text_width as _estimate_svg_text_width
+from .export_text import wrap_text_to_width as _wrap_text_to_width
+from .export_text import wrap_timeline_text as _wrap_timeline_text
+from .export_theme import ARROW_STYLES, C_DARK, C_LIGHT, INDUSTRY_THEMES, resolve_arrow_style as _resolve_arrow_style
+from .export_theme import resolve_system_colors as _resolve_system_colors
+from .export_theme import resolve_theme as _resolve_theme
+
 
 # ─── Design tokens ───────────────────────────────────────────────
 
-# Light theme (default) — warm, professional, matches DESIGN.md
-C_LIGHT = {
-    "bg": "#F8FAFC",
-    "canvas": "#FFFFFF",
-    "border": "#CBD5E1",
-    "text_main": "#0F172A",
-    "text_sub": "#64748B",
-    "layer_header_bg": "#F1F5F9",
-    "layer_border": "#E2E8F0",
-    "cap_fill": "#E8F5F5",
-    "cap_stroke": "#0B6E6E",
-    "sys_fill": "#EFF6FF",
-    "sys_stroke": "#3B82F6",
-    "actor_fill": "#FFF7ED",
-    "actor_stroke": "#F97316",
-    "flow_fill": "#FEFCE8",
-    "flow_stroke": "#CA8A04",
-    "arrow": "#0B6E6E",
-    "arrow_muted": "#94A3B8",
-    "arrow_label": "#475569",
-    "arrow_label_bg": "#FFFFFF",
-}
-
-# Dark theme — deep slate with vibrant accent colors
-C_DARK = {
-    "bg": "#020617",
-    "canvas": "#0F172A",
-    "border": "#1E293B",
-    "text_main": "#E2E8F0",
-    "text_sub": "#94A3B8",
-    "layer_header_bg": "#0F172A",
-    "layer_border": "#1E293B",
-    "cap_fill": "#064E3B",
-    "cap_stroke": "#34D399",
-    "sys_fill": "#1E3A5F",
-    "sys_stroke": "#60A5FA",
-    "actor_fill": "#451A03",
-    "actor_stroke": "#FB923C",
-    "flow_fill": "#422006",
-    "flow_stroke": "#FBBF24",
-    "arrow": "#34D399",
-    "arrow_muted": "#6B7280",
-    "arrow_label": "#CBD5E1",
-    "arrow_label_bg": "#1E293B",
-}
-
 # Backward compatibility alias
 C = C_LIGHT
-
-
-def _resolve_theme(name: str = "light", industry: str | None = None) -> dict:
-    """Return the color palette for the given theme, with optional industry accent."""
-    base = C_DARK if name == "dark" else C_LIGHT
-    if not industry or industry == "common":
-        return base
-    overrides = INDUSTRY_THEMES.get(industry)
-    if not overrides:
-        return base
-    result = dict(base)
-    accent = overrides["accent"]
-    result["cap_stroke"] = accent
-    result["actor_stroke"] = accent
-    result["arrow"] = accent
-    return result
-
-
-# ─── Industry-specific accent colors ─────────────────────────────
-INDUSTRY_THEMES: dict[str, dict[str, str]] = {
-    "retail": {
-        "accent": "#F97316",
-    },
-    "finance": {
-        "accent": "#3B82F6",
-    },
-    "manufacturing": {
-        "accent": "#6B7280",
-    },
-}
-
-
-# ─── Semantic colors by system category ──────────────────────────
-# Maps system.category to (fill, stroke) for light and dark themes.
-# When a system has no category, falls back to sys_fill/sys_stroke.
-SYSTEM_CATEGORY_COLORS: dict[str, dict[str, dict[str, str]]] = {
-    "frontend": {
-        "light": {"fill": "#ECFEFF", "stroke": "#0891B2"},
-        "dark": {"fill": "#0E2A3D", "stroke": "#22D3EE"},
-    },
-    "backend": {
-        "light": {"fill": "#ECFDF5", "stroke": "#10B981"},
-        "dark": {"fill": "#0E2E1F", "stroke": "#34D399"},
-    },
-    "database": {
-        "light": {"fill": "#F5F3FF", "stroke": "#8B5CF6"},
-        "dark": {"fill": "#1E1535", "stroke": "#A78BFA"},
-    },
-    "message_bus": {
-        "light": {"fill": "#F0FDF4", "stroke": "#22C55E"},
-        "dark": {"fill": "#0F2518", "stroke": "#4ADE80"},
-    },
-    "cloud": {
-        "light": {"fill": "#FFFBEB", "stroke": "#F59E0B"},
-        "dark": {"fill": "#2A2010", "stroke": "#FBBF24"},
-    },
-    "security": {
-        "light": {"fill": "#FFF1F2", "stroke": "#F43F5E"},
-        "dark": {"fill": "#2A1018", "stroke": "#FB7185"},
-    },
-    "external": {
-        "light": {"fill": "#F8FAFC", "stroke": "#64748B"},
-        "dark": {"fill": "#1A2030", "stroke": "#94A3B8"},
-    },
-}
-
-# Category alias mapping: maps common category values to canonical keys
-CATEGORY_ALIASES: dict[str, str] = {
-    "web": "frontend",
-    "mobile": "frontend",
-    "ui": "frontend",
-    "api": "backend",
-    "service": "backend",
-    "microservice": "backend",
-    "storage": "database",
-    "infra": "cloud",
-    "infrastructure": "cloud",
-    "devops": "cloud",
-    "auth": "security",
-    "third-party": "external",
-    "third_party": "external",
-    "saas": "external",
-}
-
-
-def _resolve_system_colors(category: str | None, theme: str) -> tuple[str, str]:
-    """Get (fill, stroke) for a system node based on its category."""
-    canonical = CATEGORY_ALIASES.get(category, category) if category else None
-    palette = SYSTEM_CATEGORY_COLORS.get(canonical)
-    if palette:
-        colors = palette.get(theme, palette.get("light", {}))
-        return colors.get("fill", ""), colors.get("stroke", "")
-    return "", ""
-
-
-# ─── Semantic arrow styles ────────────────────────────────────────
-# Maps relation type → (color, dash_pattern, marker_id).
-# Color values are for dark theme; light theme uses arrow/arrow_muted tokens.
-ARROW_STYLES: dict[str, dict[str, str | None]] = {
-    "supports":   {"color": "#34D399", "dash": None,    "marker": "arrow-solid"},
-    "depends-on": {"color": "#94A3B8", "dash": "6,4",   "marker": "arrow-open"},
-    "flows-to":   {"color": "#60A5FA", "dash": None,    "marker": "arrow-solid"},
-    "owned-by":   {"color": "#FBBF24", "dash": "3,3",   "marker": "arrow-dot"},
-}
-
-# Light theme overrides for arrow colors
-_ARROW_STYLES_LIGHT: dict[str, dict[str, str]] = {
-    "supports":   {"color": "#0B6E6E"},
-    "depends-on": {"color": "#94A3B8"},
-    "flows-to":   {"color": "#3B82F6"},
-    "owned-by":   {"color": "#D97706"},
-}
-
-
-def _resolve_arrow_style(relation_type: str, theme: str) -> dict[str, str | None]:
-    """Get arrow style for a relation type, adjusted for theme."""
-    style = ARROW_STYLES.get(relation_type, ARROW_STYLES["supports"]).copy()
-    if theme == "light" and relation_type in _ARROW_STYLES_LIGHT:
-        style["color"] = _ARROW_STYLES_LIGHT[relation_type]["color"]
-    return style
 
 
 FONT = "system-ui, -apple-system, sans-serif"
@@ -2017,14 +1860,84 @@ def _render_free_flow_svg(
     return "\n".join(parts)
 
 
-def export_svg_auto(blueprint: dict[str, Any], target: Path, theme: str = "dark",
-                    industry: str | None = None) -> None:
+def export_svg_auto(
+    blueprint: dict[str, Any],
+    target: Path,
+    theme: str = "dark",
+    industry: str | None = None,
+    requested_route: str | None = None,
+) -> None:
     """Export using free-flow L→R data flow layout.
 
     This is the default export: positions systems by category in columns
     (Cloud → Backend → Database) with semantic colors and arrows.
     When systems have ``layer`` fields, uses _layout_layered instead.
     """
+    route_decision = resolve_export_route(blueprint, requested_route=requested_route)
+
+    _export_by_route(
+        blueprint,
+        target,
+        route=route_decision.route,
+        theme=theme,
+        industry=industry,
+    )
+    integrity = check_svg_integrity(target.read_text(encoding="utf-8"))
+    if not integrity.errors:
+        return
+
+    if route_decision.fallback_route:
+        _export_by_route(
+            blueprint,
+            target,
+            route=route_decision.fallback_route,
+            theme=theme,
+            industry=industry,
+        )
+        fallback_integrity = check_svg_integrity(target.read_text(encoding="utf-8"))
+        if not fallback_integrity.errors:
+            return
+        raise ExportIntegrityError(
+            ExportIntegrityFailure(
+                requested_route=requested_route or route_decision.route,
+                attempted_route=route_decision.fallback_route,
+                fallback_route=route_decision.fallback_route,
+                terminal_reason="integrity_failed_after_fallback",
+                errors=fallback_integrity.errors,
+            )
+        )
+    raise ExportIntegrityError(
+        ExportIntegrityFailure(
+            requested_route=requested_route or route_decision.route,
+            attempted_route=route_decision.route,
+            fallback_route=route_decision.fallback_route,
+            terminal_reason="integrity_failed",
+            errors=integrity.errors,
+        )
+    )
+
+
+def _export_by_route(
+    blueprint: dict[str, Any],
+    target: Path,
+    *,
+    route: str,
+    theme: str,
+    industry: str | None = None,
+) -> None:
+    if route == "evolution":
+        export_evolution_timeline_svg(blueprint, target, theme=theme)
+        return
+    if route == "swimlane":
+        export_swimlane_flow_svg(blueprint, target, theme=theme)
+        return
+    if route == "hierarchy":
+        export_product_tree_svg(blueprint, target, theme=theme)
+        return
+    if route == "poster":
+        export_layer_poster_svg(blueprint, target, theme=theme)
+        return
+
     title = blueprint.get("meta", {}).get("title", "Business Blueprint")
     if industry is None:
         industry = blueprint.get("meta", {}).get("industry", "") or None
@@ -2875,80 +2788,6 @@ def _split_timeline_step_name(step_name: str) -> tuple[str, str]:
         return match.group(1), match.group(2).strip()
     return "", step_name.strip()
 
-
-def _estimate_svg_text_width(text: str, font_size: float = 11) -> float:
-    width = 0.0
-    for ch in text:
-        if ch in " 	":
-            width += font_size * 0.32
-        elif ch in "ilI1|!.,:;'`":
-            width += font_size * 0.34
-        elif ch.isascii():
-            width += font_size * (0.68 if ch.isupper() else 0.56)
-        else:
-            width += font_size * 0.96
-    return width
-
-
-def _wrap_text_to_width(text: str,
-                        max_px: float,
-                        font_size: float = 11,
-                        max_lines: int | None = 2,
-                        ellipsize: bool = True) -> list[str]:
-    if not text:
-        return [""]
-
-    lines: list[str] = []
-    current: list[str] = []
-    current_px = 0.0
-    line_limit = max_lines if max_lines is not None else float("inf")
-
-    for ch in text:
-        if ch in "\n\r":
-            if current:
-                lines.append("".join(current).strip())
-                current = []
-                current_px = 0.0
-            continue
-        ch_px = _estimate_svg_text_width(ch, font_size=font_size)
-        if current and current_px + ch_px > max_px:
-            lines.append("".join(current).strip())
-            current = [ch]
-            current_px = ch_px
-            if len(lines) >= line_limit:
-                break
-        else:
-            current.append(ch)
-            current_px += ch_px
-
-    if len(lines) < line_limit and current:
-        lines.append("".join(current).strip())
-
-    lines = [line for line in lines if line]
-    if not lines:
-        return [text.strip() or text]
-
-    if max_lines is not None and len(lines) > max_lines:
-        lines = lines[:max_lines]
-
-    consumed = "".join(lines)
-    if ellipsize and len(consumed) < len(text):
-        lines[-1] = lines[-1].rstrip("，、。：:；;,. ") + "…"
-    return lines
-
-
-def _wrap_timeline_text(text: str, max_units: int = 22,
-                        max_lines: int | None = 2,
-                        ellipsize: bool = True) -> list[str]:
-    """Wrap mixed CJK/ASCII text into short lines for timeline cards."""
-    return _wrap_text_to_width(
-        text,
-        max_px=max_units * 5.6,
-        font_size=11,
-        max_lines=max_lines,
-        ellipsize=ellipsize,
-    )
-
 def _compact_swimlane_tag(label: str) -> str:
     compact_map = {
         "会话交互": "会话",
@@ -3009,17 +2848,82 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
     AXIS_Y = 172
     CARD_Y = 210
     CARD_W = 260
-    CARD_H = 210
+    CARD_MIN_H = 210
     CARD_GAP = 26
     canvas_w = max(1120, PAD_X * 2 + len(ordered_steps) * CARD_W + max(0, len(ordered_steps) - 1) * CARD_GAP)
-    canvas_h = 500
 
     accent_release = "#DC2626"
-    accent_release_fill = "#FEF2F2"
     accent_default = colors["cap_stroke"]
-    accent_default_fill = colors["canvas"]
     accent_secondary = "#4338CA"
-    accent_secondary_fill = "#EEF2FF"
+    if theme == "dark":
+        accent_release_fill = "#2A1018"
+        accent_default_fill = colors["canvas"]
+        accent_secondary_fill = "#1A1838"
+    else:
+        accent_release_fill = "#FEF2F2"
+        accent_default_fill = colors["canvas"]
+        accent_secondary_fill = "#EEF2FF"
+
+    stage_layouts: list[dict[str, Any]] = []
+
+    timeline_start = (canvas_w - (len(ordered_steps) * CARD_W + (len(ordered_steps) - 1) * CARD_GAP)) / 2
+
+    for idx, step in enumerate(ordered_steps):
+        card_x = timeline_start + idx * (CARD_W + CARD_GAP)
+        center_x = card_x + CARD_W / 2
+
+        date_label, step_title = _split_timeline_step_name(step.get("name", ""))
+        actor_name = actors.get(step.get("actorId", ""), "未标注对象")
+        capability_names = [capabilities.get(cid, cid) for cid in step.get("capabilityIds", [])[:2]]
+        system_names = [systems.get(sid, sid) for sid in step.get("systemIds", [])[:3]]
+        is_release = "发布" in step_title or "上线" in step_title or "套件" in step_title
+        stroke = accent_release if is_release else (accent_secondary if idx % 2 else accent_default)
+        fill = accent_release_fill if is_release else (accent_secondary_fill if idx % 2 else accent_default_fill)
+
+        title_lines = _wrap_timeline_text(step_title, max_units=18, max_lines=2)
+        title_y = CARD_Y + 72
+        actor_y = title_y + len(title_lines) * 22 + 6
+        key_change_y = actor_y + 28
+
+        pill_layout: list[tuple[float, float, float, str]] = []
+        pill_y = key_change_y + 20
+        pill_x = card_x + 16
+        pill_right = card_x + CARD_W - 16
+        for sys_name in system_names:
+            pill_label = sys_name[:12] + "…" if len(sys_name) > 12 else sys_name
+            pill_w = max(78, 20 + _estimate_svg_text_width(pill_label, font_size=10))
+            if pill_x + pill_w > pill_right:
+                pill_x = card_x + 16
+                pill_y += 28
+            pill_layout.append((pill_x, pill_y, pill_w, pill_label))
+            pill_x += pill_w + 6
+
+        card_h = CARD_MIN_H
+        if pill_layout:
+            last_pill_bottom = max(y + 22 for _, y, _, _ in pill_layout)
+            card_h = max(card_h, int(last_pill_bottom - CARD_Y + 18))
+        stage_layouts.append(
+            {
+                "index": idx,
+                "center_x": center_x,
+                "card_x": card_x,
+                "date_label": date_label,
+                "actor_name": actor_name,
+                "capability_names": capability_names,
+                "system_layout": pill_layout,
+                "stroke": stroke,
+                "fill": fill,
+                "title_lines": title_lines,
+                "title_y": title_y,
+                "actor_y": actor_y,
+                "key_change_y": key_change_y,
+                "card_h": card_h,
+            }
+        )
+
+    max_card_bottom = max(CARD_Y + stage["card_h"] for stage in stage_layouts) if stage_layouts else CARD_Y + CARD_MIN_H
+    footer_y = max_card_bottom + 42
+    canvas_h = max(500, int(footer_y + 30))
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" '
@@ -3029,7 +2933,6 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
         _title_svg(title, "演进时间线", canvas_w, colors=colors),
     ]
 
-    title_bottom = PAD_Y + TITLE_H
     left = PAD_X + 20
     right = canvas_w - PAD_X - 20
     parts.append(
@@ -3037,21 +2940,20 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
         f'stroke="{colors["border"]}" stroke-width="4" stroke-linecap="round"/>'
     )
 
-    centers: list[float] = []
-    timeline_start = (canvas_w - (len(ordered_steps) * CARD_W + (len(ordered_steps) - 1) * CARD_GAP)) / 2
-
-    for idx, step in enumerate(ordered_steps):
-        card_x = timeline_start + idx * (CARD_W + CARD_GAP)
-        center_x = card_x + CARD_W / 2
-        centers.append(center_x)
-
-        date_label, step_title = _split_timeline_step_name(step.get("name", ""))
-        actor_name = actors.get(step.get("actorId", ""), "未标注对象")
-        capability_names = [capabilities.get(cid, cid) for cid in step.get("capabilityIds", [])[:2]]
-        system_names = [systems.get(sid, sid) for sid in step.get("systemIds", [])[:3]]
-        is_release = "发布" in step_title or "上线" in step_title or "套件" in step_title
-        stroke = accent_release if is_release else (accent_secondary if idx % 2 else accent_default)
-        fill = accent_release_fill if is_release else (accent_secondary_fill if idx % 2 else accent_default_fill)
+    for stage in stage_layouts:
+        idx = stage["index"]
+        center_x = stage["center_x"]
+        card_x = stage["card_x"]
+        stroke = stage["stroke"]
+        fill = stage["fill"]
+        actor_name = stage["actor_name"]
+        capability_names = stage["capability_names"]
+        title_lines = stage["title_lines"]
+        title_y = stage["title_y"]
+        actor_y = stage["actor_y"]
+        key_change_y = stage["key_change_y"]
+        date_label = stage["date_label"]
+        card_h = stage["card_h"]
 
         parts.append(
             f'<circle cx="{center_x}" cy="{AXIS_Y}" r="11" fill="{colors["canvas"]}" '
@@ -3074,7 +2976,7 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
         )
 
         parts.append(
-            f'<rect x="{card_x}" y="{CARD_Y}" width="{CARD_W}" height="{CARD_H}" rx="18" '
+            f'<rect x="{card_x}" y="{CARD_Y}" width="{CARD_W}" height="{card_h}" rx="18" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
         )
 
@@ -3085,8 +2987,6 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
             f'fill="{stroke}" font-weight="700">阶段 {idx + 1}</text>'
         )
 
-        title_lines = _wrap_timeline_text(step_title, max_units=18, max_lines=2)
-        title_y = CARD_Y + 72
         parts.append(
             f'<text x="{card_x + 22}" y="{title_y}" font-size="18" fill="{colors["text_main"]}" font-weight="700">'
         )
@@ -3095,7 +2995,6 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
             parts.append(f'<tspan x="{card_x + 22}" dy="{dy}">{_esc(line)}</tspan>')
         parts.append('</text>')
 
-        actor_y = CARD_Y + 122
         parts.append(
             f'<text x="{card_x + 22}" y="{actor_y}" font-size="11" fill="{colors["text_sub"]}" font-weight="600">定位对象</text>'
         )
@@ -3105,33 +3004,23 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
 
         if capability_names:
             parts.append(
-                f'<text x="{card_x + 22}" y="{actor_y + 28}" font-size="11" fill="{colors["text_sub"]}" font-weight="600">关键变化</text>'
+                f'<text x="{card_x + 22}" y="{key_change_y}" font-size="11" fill="{colors["text_sub"]}" font-weight="600">关键变化</text>'
             )
             parts.append(
-                f'<text x="{card_x + 90}" y="{actor_y + 28}" font-size="11" fill="{colors["text_main"]}">{_esc(" / ".join(capability_names))}</text>'
+                f'<text x="{card_x + 90}" y="{key_change_y}" font-size="11" fill="{colors["text_main"]}">{_esc(" / ".join(capability_names))}</text>'
             )
 
-        pill_y = CARD_Y + 170
-        pill_x = card_x + 22
-        for s_idx, sys_name in enumerate(system_names):
-            pill_label = sys_name[:12] + "…" if len(sys_name) > 12 else sys_name
-            # SVG text tends to render mixed CJK/ASCII a bit wider than the
-            # simple 8/6 estimate, so keep pill sizing intentionally conservative.
-            pill_w = max(78, 24 + sum(10 if ord(c) > 127 else 7 for c in pill_label))
-            if pill_x + pill_w > card_x + CARD_W - 18:
-                pill_x = card_x + 22
-                pill_y += 28
+        for pill_x, pill_y, pill_w, pill_label in stage["system_layout"]:
             parts.append(
                 f'<rect x="{pill_x}" y="{pill_y}" width="{pill_w}" height="22" rx="11" '
                 f'fill="{colors["canvas"]}" fill-opacity="0.96" stroke="{stroke}" stroke-width="1"/>'
                 f'<text x="{pill_x + pill_w / 2}" y="{pill_y + 15}" text-anchor="middle" font-size="10" '
                 f'fill="{stroke}" font-weight="600">{_esc(pill_label)}</text>'
             )
-            pill_x += pill_w + 8
 
     scope_text = "仅含官网明确产品发布、定位强化与场景深化"
     parts.append(
-        f'<text x="{canvas_w / 2}" y="{canvas_h - 22}" text-anchor="middle" font-size="12" '
+        f'<text x="{canvas_w / 2}" y="{footer_y}" text-anchor="middle" font-size="12" '
         f'fill="{colors["text_sub"]}">{_esc(scope_text)}</text>'
     )
     parts.append("</svg>")

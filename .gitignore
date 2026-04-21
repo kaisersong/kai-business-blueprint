@@ -9,6 +9,8 @@ docs/
 demos/*.exports/
 demos/common-demo.txt
 .xiaok/
+.serena/
+.DS_Store
 *.blueprint.html
 *.blueprint.exports/
 projects/workspace/

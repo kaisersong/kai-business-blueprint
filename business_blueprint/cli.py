@@ -8,6 +8,7 @@ from pathlib import Path
 from .export_drawio import export_drawio
 from .export_excalidraw import export_excalidraw
 from .export_html import export_html_viewer
+from .export_integrity import ExportIntegrityError
 from .export_mermaid import export_mermaid
 from .export_svg import export_svg, export_svg_auto, export_product_tree_svg, export_matrix_svg, export_capability_map_svg, export_swimlane_flow_svg
 from .generate import write_plan_output
@@ -100,17 +101,21 @@ def main() -> int:
         export_dir.mkdir(parents=True, exist_ok=True)
         html_path = blueprint_path.parent / f"{blueprint_path.stem}.html"
         fmt = args.export_format or "svg"
-        if fmt == "svg":
-            export_svg_auto(blueprint, export_dir / "solution.svg", theme=args.theme)
-            export_html_viewer(blueprint, html_path, theme=args.theme)
-        elif fmt == "drawio":
-            export_drawio(blueprint, export_dir / "solution.drawio")
-        elif fmt == "excalidraw":
-            export_excalidraw(blueprint, export_dir / "solution.excalidraw")
-        elif fmt == "mermaid":
-            export_mermaid(blueprint, export_dir / "solution.mermaid.md")
-        else:
-            print(f"Unknown format: {fmt}. Supported: svg (default), drawio, excalidraw, mermaid", file=sys.stderr)
+        try:
+            if fmt == "svg":
+                export_svg_auto(blueprint, export_dir / "solution.svg", theme=args.theme)
+                export_html_viewer(blueprint, html_path, theme=args.theme)
+            elif fmt == "drawio":
+                export_drawio(blueprint, export_dir / "solution.drawio")
+            elif fmt == "excalidraw":
+                export_excalidraw(blueprint, export_dir / "solution.excalidraw")
+            elif fmt == "mermaid":
+                export_mermaid(blueprint, export_dir / "solution.mermaid.md")
+            else:
+                print(f"Unknown format: {fmt}. Supported: svg (default), drawio, excalidraw, mermaid", file=sys.stderr)
+                return 1
+        except ExportIntegrityError as exc:
+            print(json.dumps(exc.to_payload(), ensure_ascii=False, indent=2), file=sys.stderr)
             return 1
         return 0
 
@@ -150,7 +155,10 @@ def _read_source_text(value: str | None) -> str:
     if len(value.encode("utf-8")) > 255:
         return value
     path = Path(value)
-    return path.read_text(encoding="utf-8") if path.exists() else value
+    if not path.exists():
+        return value
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
 
 
 if __name__ == "__main__":

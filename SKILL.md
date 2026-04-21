@@ -206,6 +206,21 @@ When user requests an architecture diagram (keywords: "架构图", "architecture
 If the request does not match one of the supported standard templates above, stay on the default `freeflow` export path. Do not switch to another generic view type as a fallback.
 If a standard template would create a squeezed, clipped, or overcrowded diagram, stop using the fixed template geometry and fall back to `freeflow` or a wrapped multi-row layout.
 
+### Route eligibility matrix
+
+Use an explicit route contract before rendering:
+
+| Route | Structural prerequisites | First fallback | Terminal behavior |
+|------|---------------------------|----------------|-------------------|
+| `freeflow` | Any valid blueprint with at least one renderable node or relation | None | If integrity still fails, export exits non-zero with a structural diagnostics payload |
+| `architecture-template` | Recognizable L→R architecture shape, categorized systems, limited per-layer density, and no route-breaking overflow risk | `freeflow` | Same as above |
+| `poster` | Clear layer/group structure with bounded peer density per row or wrapped-row support | wrapped poster or `freeflow` | Same as above |
+| `swimlane` | Actor-owned flow steps with meaningful lane grouping | `freeflow` | Same as above |
+| `hierarchy` | Stable tree/group relationship with low ambiguity in parent-child grouping | `freeflow` | Same as above |
+| `evolution` | Ordered chronological or staged progression data | `freeflow` | Same as above |
+
+Do not invent route heuristics ad hoc inside a renderer. Route eligibility must stay explicit and reviewable.
+
 ### Generation Rules
 - Use dark mode by default (`#020617` bg + 40px grid). Only use light mode when the user explicitly asks for it.
 - L→R data flow: Clients(左) → Frontend → Backend → Database(右)
@@ -222,6 +237,7 @@ If a standard template would create a squeezed, clipped, or overcrowded diagram,
 - Z-order: bg → grid → title → region → arrows → nodes → legend → cards → footer
 - Component border: `rx="8"`, `stroke-width="2"`
 - Region border: `rx="16"`, `stroke-dasharray="8,4"`, `opacity="0.4"`
+- Geometry-sensitive integrity checks must use the numeric thresholds from `evals/export-integrity-thresholds.json`, not prose heuristics.
 
 ### Output
 - Single HTML file: `{blueprint_stem}.html` alongside the blueprint JSON
@@ -233,3 +249,17 @@ If a standard template would create a squeezed, clipped, or overcrowded diagram,
 - If `--validate` returns errors: fix structural issues before proceeding to `--export`.
 - If `--validate` returns only warnings: proceed but note the warnings in any handoff.
 - If Python version < 3.12: the package will refuse to install. Use `python3 -m business_blueprint.cli` with system Python as fallback.
+- If a specialized route fails integrity: fall back to its configured fallback route.
+- If `freeflow` also fails integrity: export exits non-zero with a structural diagnostics payload instead of emitting a silently broken artifact.
+
+## Cross-Platform Scope
+
+Phase 2 does not attempt full Windows terminal parity.
+
+Known deferred cases:
+- PowerShell pipe quirks beyond documented CLI contract tests
+- console-default encoding issues outside explicit UTF-8 execution paths
+
+Accepted workaround for encoding-sensitive runs:
+- use `python -m business_blueprint.cli`
+- set `PYTHONIOENCODING=utf-8` where needed
