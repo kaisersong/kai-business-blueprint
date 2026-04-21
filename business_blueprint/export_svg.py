@@ -328,6 +328,101 @@ def _arrow_label(mx: int, my: int, label: str,
     )
 
 
+def _label_box(mx: int, my: int, label: str) -> tuple[int, int, int, int]:
+    label_w = len(label) * 6 + 12
+    return mx - label_w // 2, my - 9, label_w, 18
+
+
+def _label_boxes_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int], pad: int = 4) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (
+        ax + aw + pad <= bx
+        or bx + bw + pad <= ax
+        or ay + ah + pad <= by
+        or by + bh + pad <= ay
+    )
+
+
+def _render_arrow_labels(
+    labels: list[dict[str, Any]],
+    *,
+    colors: dict,
+    canvas_w: int,
+    canvas_h: int,
+) -> list[str]:
+    rendered: list[str] = []
+    occupied: list[tuple[int, int, int, int]] = []
+    margin_x = 8
+    min_y = 78
+    max_y = max(min_y, canvas_h - 26)
+
+    for item in labels:
+        label = item["label"]
+        base_x = int(item["x"])
+        base_y = int(item["y"])
+        offsets = item.get("offsets") or [
+            (0, -14),
+            (0, 14),
+            (28, -14),
+            (-28, -14),
+            (28, 14),
+            (-28, 14),
+            (0, -32),
+            (0, 32),
+        ]
+
+        chosen: tuple[int, int, tuple[int, int, int, int]] | None = None
+        for dx, dy in offsets:
+            mx = base_x + dx
+            my = base_y + dy
+            x, y, box_w, box_h = _label_box(mx, my, label)
+            x = max(margin_x, min(x, max(margin_x, canvas_w - box_w - margin_x)))
+            y = max(min_y, min(y, max_y))
+            candidate = (x, y, box_w, box_h)
+            if any(_label_boxes_overlap(candidate, other) for other in occupied):
+                continue
+            chosen = (x + box_w // 2, y + 9, candidate)
+            break
+
+        if chosen is None:
+            box_w = len(label) * 6 + 12
+            box_h = 18
+            for step in range(1, 10):
+                fallback_offsets = [
+                    (0, -14 * step),
+                    (0, 14 * step),
+                    (28, -14 * step),
+                    (-28, -14 * step),
+                    (28, 14 * step),
+                    (-28, 14 * step),
+                ]
+                for dx, dy in fallback_offsets:
+                    mx = base_x + dx
+                    my = base_y + dy
+                    x = max(margin_x, min(mx - box_w // 2, max(margin_x, canvas_w - box_w - margin_x)))
+                    y = max(min_y, min(my - 9, max_y))
+                    candidate = (x, y, box_w, box_h)
+                    if any(_label_boxes_overlap(candidate, other) for other in occupied):
+                        continue
+                    chosen = (x + box_w // 2, y + 9, candidate)
+                    break
+                if chosen is not None:
+                    break
+
+        if chosen is None:
+            x, y, box_w, box_h = _label_box(base_x, base_y, label)
+            x = max(margin_x, min(x, max(margin_x, canvas_w - box_w - margin_x)))
+            y = max(min_y, min(y, max_y))
+            chosen = (x + box_w // 2, y + 9, (x, y, box_w, box_h))
+
+        mx, my, candidate = chosen
+        occupied.append(candidate)
+        rendered.append(_arrow_label(mx, my, label, colors=colors))
+
+    return rendered
+
+
 def _node_center(n: dict) -> tuple[int, int]:
     return n["x"] + NODE_W // 2, n["y"] + NODE_H // 2
 
@@ -797,7 +892,7 @@ def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light",
         relations_by_endpoints[(rel["from"], rel["to"])] = rel.get("type", "supports")
 
     # Pass 1: draw all lines
-    arrow_labels: list[tuple[int, int, str]] = []
+    arrow_labels: list[dict[str, Any]] = []
     for arrow in layout["arrows"]:
         src = layout["nodes"].get(arrow["from"])
         tgt = layout["nodes"].get(arrow["to"])
@@ -826,9 +921,6 @@ def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light",
             arrow_labels.append((mx, my, arrow["label"]))
 
     # Pass 2: draw all labels on top of arrows (background masks the line)
-    for mx, my, label in arrow_labels:
-        parts.append(_arrow_label(mx, my, label, colors=colors))
-
     # Nodes (z-order: on top of arrows)
     for nid, n in layout["nodes"].items():
         kind = n["kind"]
@@ -858,11 +950,11 @@ def export_svg(blueprint: dict[str, Any], target: Path, theme: str = "light",
 
     card_y = h - 50
     card_data = [
-        ("系统", str(n_systems)),
-        ("能力", str(n_capabilities)),
-        ("角色", str(n_actors)),
-        ("流程", str(n_flow_steps)),
-        ("覆盖率", sys_coverage),
+        ("SYSTEMS", str(n_systems)),
+        ("CAPABILITIES", str(n_capabilities)),
+        ("ACTORS", str(n_actors)),
+        ("FLOW STEPS", str(n_flow_steps)),
+        ("COVERAGE", sys_coverage),
     ]
     card_w = 110
     card_h = 38
@@ -941,6 +1033,7 @@ def _categorize_system(sys_obj: dict) -> str:
         _SVC_MAP = {
             "serverless": "backend", "compute": "backend",
             "cdn": "cloud", "gateway": "cloud", "proxy": "cloud",
+            "cloudwatch": "cloud", "monitor": "cloud", "logging": "cloud",
             "database": "database", "cache": "database",
             "auth": "security", "iam": "security",
             "queue": "message_bus", "event": "message_bus",
@@ -1585,12 +1678,12 @@ def _render_free_flow_svg(
         _svg_defs(colors=colors, theme=theme),
     ]
 
-    # Background
+    bg_rect_idx = len(parts)
+    parts.append(f'<rect width="{w}" height="{h}" fill="{colors["bg"]}"/>')
+    grid_rect_idx: int | None = None
     if theme == "dark":
-        parts.append(f'<rect width="{w}" height="{h}" fill="{colors["bg"]}"/>')
+        grid_rect_idx = len(parts)
         parts.append(f'<rect width="{w}" height="{h}" fill="url(#grid)"/>')
-    else:
-        parts.append(f'<rect width="{w}" height="{h}" fill="{colors["bg"]}"/>')
 
     # Title
     parts.append(_title_svg(title, subtitle, w, colors=colors))
@@ -1700,7 +1793,7 @@ def _render_free_flow_svg(
             else:
                 parts.append(_render_arrow_line(sx, sy, tx, ty, arrow, colors))
             if arrow.get("label"):
-                arrow_labels.append(((sx + tx) // 2, (sy + ty) // 2, arrow["label"]))
+                arrow_labels.append({"x": (sx + tx) // 2, "y": (sy + ty) // 2, "label": arrow["label"], "offsets": [(0, -16), (0, 16), (36, -16), (-36, -16), (36, 16), (-36, 16)]})
         elif same_row:
             # Horizontal: source right edge → target left edge
             # 使用相同的 y 坐标，确保完全水平（不因节点高度差异产生斜线）
@@ -1711,7 +1804,7 @@ def _render_free_flow_svg(
             ty = sy  # 强制水平
             parts.append(_render_arrow_line(sx, sy, tx, ty, arrow, colors))
             if arrow.get("label"):
-                arrow_labels.append(((sx + tx) // 2, sy, arrow["label"]))
+                arrow_labels.append({"x": (sx + tx) // 2, "y": sy, "label": arrow["label"], "offsets": [(0, -14), (0, 14), (30, -14), (-30, -14), (30, 14), (-30, 14)]})
         else:
             # Cross-row: elbow path routing
             if src["y"] > tgt["y"]:
@@ -1782,9 +1875,7 @@ def _render_free_flow_svg(
                 parts.append(f'<path d="{path_d}" {style} marker-end="url(#{marker})"/>')
 
             if arrow.get("label"):
-                arrow_labels.append((max(sx, tx) + 4, mid_y, arrow["label"]))
-    for mx, my, label in arrow_labels:
-        parts.append(_arrow_label(mx, my, label, colors=colors))
+                arrow_labels.append({"x": (sx + tx) // 2, "y": mid_y, "label": arrow["label"], "offsets": [(0, -16), (0, 16), (32, -16), (-32, -16), (32, 16), (-32, 16)]})
 
     # Update region rect to contain all arrow paths
     if region_rect_idx is not None:
@@ -1818,9 +1909,12 @@ def _render_free_flow_svg(
         if min_canvas_bottom > h:
             h = min_canvas_bottom
             parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{FONT}">'
+            parts[bg_rect_idx] = f'<rect width="{w}" height="{h}" fill="{colors["bg"]}"/>'
+            if grid_rect_idx is not None:
+                parts[grid_rect_idx] = f'<rect width="{w}" height="{h}" fill="url(#grid)"/>'
 
-
-
+    for label_svg in _render_arrow_labels(arrow_labels, colors=colors, canvas_w=w, canvas_h=h):
+        parts.append(label_svg)
 
     # Nodes with semantic colors
     for nid, n in nodes.items():
@@ -1985,13 +2079,21 @@ def export_product_tree_svg(blueprint: dict[str, Any], target: Path, theme: str 
     else:
         segments = []
     if not segments:
-        # Auto-derive: group systems by their "segment" property
+        # Auto-derive: prefer explicit segment, otherwise fall back to layered blueprint grouping.
         seg_map: dict[str, list[str]] = {}
+        seg_order: list[str] = []
         for s in systems:
-            seg_label = s.get("properties", {}).get("segment", s.get("segment", ""))
-            if seg_label:
-                seg_map.setdefault(seg_label, []).append(s["id"])
-        segments = [{"label": label, "ids": ids} for label, ids in seg_map.items()]
+            seg_label = (
+                s.get("properties", {}).get("segment", s.get("segment", ""))
+                or s.get("layer", "")
+            )
+            if not seg_label:
+                continue
+            if seg_label not in seg_map:
+                seg_map[seg_label] = []
+                seg_order.append(seg_label)
+            seg_map[seg_label].append(s["id"])
+        segments = [{"label": label, "ids": seg_map[label]} for label in seg_order]
 
     # Filter to actual systems
     active_segments: list[dict] = []
@@ -2015,15 +2117,26 @@ def export_product_tree_svg(blueprint: dict[str, Any], target: Path, theme: str 
     ROOT_H = 44
 
     # Color palette — auto-assign distinct colors per segment
-    _SEG_PALETTE = [
-        ("#4338CA", "#EEF2FF"),
-        ("#0B6E6E", "#E8F5F5"),
-        ("#0F7B6C", "#E8F5F5"),
-        ("#059669", "#ECFDF5"),
-        ("#D97706", "#FEFCE8"),
-        ("#7C3AED", "#F5F3FF"),
-        ("#DC2626", "#FEF2F2"),
-    ]
+    if theme == "dark":
+        _SEG_PALETTE = [
+            ("#A78BFA", "#1E1535"),
+            ("#22D3EE", "#0E2A3D"),
+            ("#34D399", "#0E2E1F"),
+            ("#4ADE80", "#0F2518"),
+            ("#FBBF24", "#2A2010"),
+            ("#FB7185", "#2A1018"),
+            ("#60A5FA", "#1E3A5F"),
+        ]
+    else:
+        _SEG_PALETTE = [
+            ("#4338CA", "#EEF2FF"),
+            ("#0B6E6E", "#E8F5F5"),
+            ("#0F7B6C", "#E8F5F5"),
+            ("#059669", "#ECFDF5"),
+            ("#D97706", "#FEFCE8"),
+            ("#7C3AED", "#F5F3FF"),
+            ("#DC2626", "#FEF2F2"),
+        ]
     seg_colors: dict[str, tuple[str, str]] = {}
     for i, seg in enumerate(active_segments):
         seg_colors[seg["label"]] = _SEG_PALETTE[i % len(_SEG_PALETTE)]
@@ -2071,9 +2184,9 @@ def export_product_tree_svg(blueprint: dict[str, Any], target: Path, theme: str 
     root_label = title.split("—")[0].strip() if "—" in title else title.split("-")[0].strip()
     parts.append(
         f'<rect class="node-rect" x="{cx - ROOT_W / 2}" y="{root_y}" width="{ROOT_W}" height="{ROOT_H}" '
-        f'rx="8" fill="#1E293B" stroke="#0F172A" stroke-width="1.5"/>'
+        f'rx="8" fill="{colors["canvas"]}" stroke="{colors["border"]}" stroke-width="1.5"/>'
         f'<text class="node-label" x="{cx}" y="{root_y + ROOT_H / 2 + 5}" '
-        f'text-anchor="middle" font-size="15" fill="#FFFFFF" '
+        f'text-anchor="middle" font-size="15" fill="{colors["text_main"]}" '
         f'font-weight="700">{_esc(root_label)}</text>'
     )
 
@@ -2095,7 +2208,7 @@ def export_product_tree_svg(blueprint: dict[str, Any], target: Path, theme: str 
         parts.append(
             f'<rect x="{seg_start_x - SEG_INNER_PAD}" y="{current_y}" '
             f'width="{seg_w + SEG_INNER_PAD * 2}" height="{sl["h"]}" '
-            f'rx="10" fill="{fill}" stroke="{stroke}" stroke-width="1" opacity="0.6"/>'
+            f'rx="10" fill="{fill}" stroke="{stroke}" stroke-width="1" fill-opacity="{0.82 if theme == "dark" else 0.6}"/>'
         )
         # Segment label
         parts.append(
@@ -2130,9 +2243,9 @@ def export_product_tree_svg(blueprint: dict[str, Any], target: Path, theme: str 
                 bx = nx + COL_W // 2 - bw // 2
                 parts.append(
                     f'<rect x="{bx}" y="{badge_y + j * (CAP_H + 4)}" width="{bw}" height="{CAP_H}" '
-                    f'rx="3" fill="{stroke}" opacity="0.15"/>'
+                    f'rx="3" fill="{fill if theme == "dark" else stroke}" stroke="{stroke}" stroke-width="{0.8 if theme == "dark" else 0}" fill-opacity="{0.95 if theme == "dark" else 0.15}"/>'
                     f'<text x="{bx + bw // 2}" y="{badge_y + j * (CAP_H + 4) + CAP_H // 2 + 5}" '
-                    f'text-anchor="middle" font-size="9" fill="{stroke}">{_esc(cap_name)}</text>'
+                    f'text-anchor="middle" font-size="9" fill="{colors["text_main"] if theme == "dark" else stroke}">{_esc(cap_name)}</text>'
                 )
 
         current_y += sl["h"] + SEG_GAP
@@ -2527,7 +2640,7 @@ def export_swimlane_flow_svg(blueprint: dict[str, Any], target: Path, theme: str
     PAD_Y = 30
     LANE_HEADER_H = 36
     LANE_GAP = 16
-    STEP_W = 160
+    STEP_W = 220
     STEP_H = 40
     STEP_GAP = 14
     ARROW_GAP = 12
@@ -2565,22 +2678,36 @@ def export_swimlane_flow_svg(blueprint: dict[str, Any], target: Path, theme: str
         f'{_esc(subtitle)}</text></g>'
     )
 
-    lane_palette = [
-        ("#0B6E6E", "#E8F5F5"),
-        ("#059669", "#ECFDF5"),
-        ("#4338CA", "#EEF2FF"),
-        ("#D97706", "#FEFCE8"),
-        ("#DC2626", "#FEF2F2"),
-        ("#7C3AED", "#F5F3FF"),
-        ("#0891B2", "#ECFEFF"),
-        ("#65A30D", "#F7FEE7"),
-        ("#C2410C", "#FFF7ED"),
-        ("#475569", "#F8FAFC"),
-        ("#9333EA", "#FAF5FF"),
-    ]
+    if theme == "dark":
+        lane_palette = [
+            ("#22D3EE", "#0E2A3D"),
+            ("#34D399", "#0E2E1F"),
+            ("#A78BFA", "#1E1535"),
+            ("#FBBF24", "#2A2010"),
+            ("#FB7185", "#2A1018"),
+            ("#60A5FA", "#1E3A5F"),
+            ("#94A3B8", "#1A2030"),
+        ]
+    else:
+        lane_palette = [
+            ("#0B6E6E", "#E8F5F5"),
+            ("#059669", "#ECFDF5"),
+            ("#4338CA", "#EEF2FF"),
+            ("#D97706", "#FEFCE8"),
+            ("#DC2626", "#FEF2F2"),
+            ("#7C3AED", "#F5F3FF"),
+            ("#0891B2", "#ECFEFF"),
+            ("#65A30D", "#F7FEE7"),
+            ("#C2410C", "#FFF7ED"),
+            ("#475569", "#F8FAFC"),
+            ("#9333EA", "#FAF5FF"),
+        ]
 
-    # First pass: compute lane heights and step positions for arrow drawing
-    lane_positions: dict[str, dict] = {}  # actor_id → {"y": top_y, "steps": {step_id: (cx, cy)}}
+    step_by_id = {step["id"]: step for step in flow_steps}
+    step_layout: dict[str, dict[str, Any]] = {}
+
+    # First pass: compute lane heights and step positions for arrow drawing.
+    lane_positions: dict[str, dict] = {}
     current_y = PAD_Y + 72
 
     for lane_idx, actor_id in enumerate(actor_order):
@@ -2589,70 +2716,58 @@ def export_swimlane_flow_svg(blueprint: dict[str, Any], target: Path, theme: str
             continue
         stroke, fill = lane_palette[lane_idx % len(lane_palette)]
         steps = steps_by_actor.get(actor_id, [])
-        lane_h = LANE_HEADER_H + LANE_GAP + len(steps) * (STEP_H + STEP_GAP) + LANE_GAP
 
+        lane_step_y = current_y + LANE_HEADER_H + LANE_GAP
+        total_steps_h = 0
         lane_positions[actor_id] = {
             "y": current_y,
-            "h": lane_h,
             "stroke": stroke,
             "fill": fill,
             "steps": {},
         }
 
-        step_y = current_y + LANE_HEADER_H + LANE_GAP
-        for si, step in enumerate(steps):
-            cx = PAD_X + 14 + STEP_W // 2
-            cy = step_y + si * (STEP_H + STEP_GAP) + STEP_H // 2
-            lane_positions[actor_id]["steps"][step["id"]] = (cx, cy)
+        for step in steps:
+            title_lines = _wrap_text_to_width(step.get("name", ""), max_px=STEP_W - 52, font_size=11, max_lines=None, ellipsize=False)
+            step_h = max(STEP_H, 28 + len(title_lines) * 14)
+            step_layout[step["id"]] = {"lines": title_lines, "h": step_h}
+            lane_positions[actor_id]["steps"][step["id"]] = {
+                "x": PAD_X + 14,
+                "y": lane_step_y,
+                "w": STEP_W,
+                "h": step_h,
+                "cx": PAD_X + 14 + STEP_W // 2,
+                "cy": lane_step_y + step_h / 2,
+            }
+            lane_step_y += step_h + STEP_GAP
+            total_steps_h += step_h
 
+        lane_h = LANE_HEADER_H + LANE_GAP + total_steps_h + max(0, len(steps) - 1) * STEP_GAP + LANE_GAP
+        lane_positions[actor_id]["h"] = lane_h
         current_y += lane_h + LANE_GAP
 
-    # Arrows layer (drawn before cards)
+    # Arrows layer: draw only declared next-step transitions and keep them in the right-side gutter.
     arrow_parts: list[str] = []
-    # Intra-lane arrows (sequential flow within same actor)
-    for actor_id, steps in steps_by_actor.items():
-        pos_data = lane_positions.get(actor_id)
-        if not pos_data:
+    gutter_x = PAD_X + 14 + STEP_W + 12
+    for step in flow_steps:
+        from_actor = step.get("actorId", "")
+        from_pos = lane_positions.get(from_actor, {}).get("steps", {}).get(step["id"])
+        if not from_pos:
             continue
-        stroke = pos_data["stroke"]
-        for i in range(len(steps) - 1):
-            _, from_cy = pos_data["steps"][steps[i]["id"]]
-            to_cx, to_cy = pos_data["steps"][steps[i + 1]["id"]]
-            from_y = from_cy + STEP_H // 2 + 4
-            to_y = to_cy - STEP_H // 2 - 2
-
-            if from_y < to_y:
-                mid_y = (from_y + to_y) / 2
-                arrow_parts.append(
-                    f'<path d="M{PAD_X + 14 + STEP_W // 2},{from_y} '
-                    f'C{PAD_X + 14 + STEP_W // 2},{mid_y} {to_cx},{mid_y} {to_cx},{to_y}" '
-                    f'fill="none" stroke="{stroke}" stroke-width="1.5" opacity="0.4" '
-                    f'marker-end="url(#arrow-solid)"/>'
-                )
-
-    # Cross-lane arrows: capability overlap implies connection
-    for i, aid1 in enumerate(steps_by_actor):
-        for j, aid2 in enumerate(steps_by_actor):
-            if j <= i:
+        for next_id in step.get("nextStepIds") or []:
+            next_step = step_by_id.get(next_id)
+            if not next_step:
                 continue
-            p1 = lane_positions.get(aid1)
-            p2 = lane_positions.get(aid2)
-            if not p1 or not p2:
+            to_actor = next_step.get("actorId", "")
+            to_pos = lane_positions.get(to_actor, {}).get("steps", {}).get(next_id)
+            if not to_pos:
                 continue
-            s1 = steps_by_actor[aid1]
-            s2 = steps_by_actor[aid2]
-            # Connect first step of each lane
-            if s1 and s2 and s1[0]["id"] in p1["steps"] and s2[0]["id"] in p2["steps"]:
-                _, cy1 = p1["steps"][s1[0]["id"]]
-                _, cy2 = p2["steps"][s2[0]["id"]]
-                x1 = PAD_X + 14 + STEP_W + 4
-                x2 = PAD_X + 14 + STEP_W + 4
-                my = (cy1 + cy2) / 2
-                arrow_parts.append(
-                    f'<path d="M{x1},{cy1} C{x1 + 30},{my} {x2 + 30},{my} {x2},{cy2}" '
-                    f'fill="none" stroke="#94A3B8" stroke-width="1" stroke-dasharray="4,3" opacity="0.3" '
-                    f'marker-end="url(#arrow-dashed)"/>'
-                )
+            mid_y = (from_pos["cy"] + to_pos["cy"]) / 2
+            arrow_parts.append(
+                f'<path d="M{gutter_x},{from_pos["cy"]} '
+                f'C{gutter_x + 24},{mid_y} {gutter_x + 24},{mid_y} {gutter_x},{to_pos["cy"]}" '
+                f'fill="none" stroke="{colors["arrow_muted"]}" stroke-width="1.4" stroke-dasharray="4,3" opacity="0.65" '
+                f'marker-end="url(#arrow-dashed)"/>'
+            )
 
     # Second pass: render lanes and cards
     current_y = PAD_Y + 72
@@ -2663,12 +2778,12 @@ def export_swimlane_flow_svg(blueprint: dict[str, Any], target: Path, theme: str
         stroke, fill = lane_palette[lane_idx % len(lane_palette)]
 
         steps = steps_by_actor.get(actor_id, [])
-        lane_h = LANE_HEADER_H + LANE_GAP + len(steps) * (STEP_H + STEP_GAP) + LANE_GAP
+        lane_h = lane_positions[actor_id]["h"]
 
         # Lane background
         parts.append(
             f'<rect x="{PAD_X}" y="{current_y}" width="{content_w}" height="{lane_h}" '
-            f'rx="6" fill="{fill}" stroke="{stroke}" stroke-width="0.5" opacity="0.5"/>'
+            f'rx="6" fill="{fill}" stroke="{stroke}" stroke-width="{0.9 if theme == "dark" else 0.5}" fill-opacity="{0.84 if theme == "dark" else 0.5}"/>'
         )
         # Lane label with step count
         parts.append(
@@ -2677,66 +2792,495 @@ def export_swimlane_flow_svg(blueprint: dict[str, Any], target: Path, theme: str
             f'<tspan font-size="10" fill="{colors["text_sub"]}">({len(steps)}步)</tspan></text>'
         )
         # Right side: capability tags summary
-        all_caps = set()
+        all_caps: list[str] = []
         for s in steps:
             for cid in s.get("capabilityIds", []):
-                all_caps.add(cid)
-        cap_x = PAD_X + content_w - 14
-        for ci, cid in enumerate(list(all_caps)[:4]):
+                if cid not in all_caps:
+                    all_caps.append(cid)
+        cursor_x = PAD_X + content_w - 14
+        for cid in all_caps[:4]:
             cap = cap_by_id.get(cid, {})
-            tag_w = len(cap.get("name", "")) * 7 + 10
-            tx = cap_x - ci * (tag_w + 4) - tag_w
+            tag_label = _compact_swimlane_tag(cap.get("name", ""))
+            tag_w = len(tag_label) * 7 + 10
+            tx = cursor_x - tag_w
             parts.append(
                 f'<rect x="{tx}" y="{current_y + 8}" width="{tag_w}" height="18" '
-                f'rx="3" fill="{stroke}" opacity="0.15"/>'
+                f'rx="3" fill="{fill if theme == "dark" else stroke}" stroke="{stroke}" stroke-width="{0.8 if theme == "dark" else 0}" fill-opacity="{0.95 if theme == "dark" else 0.15}"/>'
                 f'<text x="{tx + tag_w // 2}" y="{current_y + 21}" '
-                f'text-anchor="middle" font-size="8" fill="{stroke}">'
-                f'{_esc(cap.get("name", ""))}</text>'
+                f'text-anchor="middle" font-size="8" fill="{colors["text_main"] if theme == "dark" else stroke}">'
+                f'{_esc(tag_label)}</text>'
             )
+            cursor_x = tx - 6
 
-        step_y = current_y + LANE_HEADER_H + LANE_GAP
         for si, step in enumerate(steps):
+            layout = step_layout[step["id"]]
             sx = PAD_X + 14
-            sy = step_y + si * (STEP_H + STEP_GAP)
+            sy = lane_positions[actor_id]["steps"][step["id"]]["y"]
+            step_h = layout["h"]
+            title_lines = layout["lines"]
 
             # Step number badge
             step_num = si + 1
             parts.append(
-                f'<rect x="{sx}" y="{sy}" width="{STEP_W}" height="{STEP_H}" '
+                f'<rect x="{sx}" y="{sy}" width="{STEP_W}" height="{step_h}" '
                 f'rx="5" fill="{colors["canvas"]}" stroke="{stroke}" stroke-width="1.5"/>'
-                f'<rect x="{sx + 2}" y="{sy + 2}" width="22" height="{STEP_H - 4}" '
+                f'<rect x="{sx + 2}" y="{sy + 2}" width="22" height="{step_h - 4}" '
                 f'rx="4" fill="{stroke}" opacity="0.12"/>'
-                f'<text x="{sx + 13}" y="{sy + STEP_H // 2 + 5}" '
+                f'<text x="{sx + 13}" y="{sy + step_h / 2 + 5}" '
                 f'text-anchor="middle" font-size="12" fill="{stroke}" font-weight="700">{step_num}</text>'
-                f'<text x="{sx + 32}" y="{sy + STEP_H // 2 + 5}" '
-                f'font-size="11" fill="{colors["text_main"]}" font-weight="500">'
-                f'{_esc(step["name"])}</text>'
             )
+            title_y = sy + (19 if len(title_lines) == 1 else 15)
+            parts.append(
+                f'<text x="{sx + 32}" y="{title_y}" font-size="11" fill="{colors["text_main"]}" font-weight="500">'
+            )
+            for line_index, line in enumerate(title_lines):
+                dy = 0 if line_index == 0 else 14
+                parts.append(f'<tspan x="{sx + 32}" dy="{dy}">{_esc(line)}</tspan>')
+            parts.append('</text>')
 
             # Capability tags
             cap_ids = step.get("capabilityIds", [])
-            for j, cid in enumerate(cap_ids[:2]):
+            tag_cursor_x = sx + STEP_W + 24
+            for cid in cap_ids[:2]:
                 cap = cap_by_id.get(cid, {})
-                tag_x = sx + STEP_W + 8 + j * 80
-                cap_name = cap.get("name", "")
+                cap_name = _compact_swimlane_tag(cap.get("name", ""))
                 if cap_name:
                     tw = len(cap_name) * 7 + 10
                     parts.append(
-                        f'<rect x="{tag_x}" y="{sy + 10}" width="{tw}" height="18" '
-                        f'rx="3" fill="{stroke}" opacity="0.15"/>'
-                        f'<text x="{tag_x + tw // 2}" y="{sy + 23}" '
-                        f'text-anchor="middle" font-size="8" fill="{stroke}">'
+                        f'<rect x="{tag_cursor_x}" y="{sy + 10}" width="{tw}" height="18" '
+                        f'rx="3" fill="{fill if theme == "dark" else stroke}" stroke="{stroke}" stroke-width="{0.8 if theme == "dark" else 0}" fill-opacity="{0.95 if theme == "dark" else 0.15}"/>'
+                        f'<text x="{tag_cursor_x + tw // 2}" y="{sy + 23}" '
+                        f'text-anchor="middle" font-size="8" fill="{colors["text_main"] if theme == "dark" else stroke}">'
                         f'{_esc(cap_name)}</text>'
                     )
+                    tag_cursor_x += tw + 8
 
         current_y += lane_h + LANE_GAP
 
-    # Insert arrows before the card elements
-    parts[3:3] = arrow_parts
+    # Draw arrows above lane backgrounds and cards so the reduced set stays visible.
+    parts.extend(arrow_parts)
 
     canvas_h = current_y + PAD_Y
     parts[0] = f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" font-family="{FONT}">'
     parts[2] = f'<rect width="{canvas_w}" height="{canvas_h}" fill="{colors["bg"]}"/>'
 
     parts.append("</svg>")
+    target.write_text("\n".join(parts), encoding="utf-8")
+
+
+def _split_timeline_step_name(step_name: str) -> tuple[str, str]:
+    """Split a flow step name into (date_label, title)."""
+    match = _re.match(r"^(\d{4}-\d{2}-\d{2})[：:\s]*(.+)$", step_name.strip())
+    if match:
+        return match.group(1), match.group(2).strip()
+    return "", step_name.strip()
+
+
+def _estimate_svg_text_width(text: str, font_size: float = 11) -> float:
+    width = 0.0
+    for ch in text:
+        if ch in " 	":
+            width += font_size * 0.32
+        elif ch in "ilI1|!.,:;'`":
+            width += font_size * 0.34
+        elif ch.isascii():
+            width += font_size * (0.68 if ch.isupper() else 0.56)
+        else:
+            width += font_size * 0.96
+    return width
+
+
+def _wrap_text_to_width(text: str,
+                        max_px: float,
+                        font_size: float = 11,
+                        max_lines: int | None = 2,
+                        ellipsize: bool = True) -> list[str]:
+    if not text:
+        return [""]
+
+    lines: list[str] = []
+    current: list[str] = []
+    current_px = 0.0
+    line_limit = max_lines if max_lines is not None else float("inf")
+
+    for ch in text:
+        if ch in "\n\r":
+            if current:
+                lines.append("".join(current).strip())
+                current = []
+                current_px = 0.0
+            continue
+        ch_px = _estimate_svg_text_width(ch, font_size=font_size)
+        if current and current_px + ch_px > max_px:
+            lines.append("".join(current).strip())
+            current = [ch]
+            current_px = ch_px
+            if len(lines) >= line_limit:
+                break
+        else:
+            current.append(ch)
+            current_px += ch_px
+
+    if len(lines) < line_limit and current:
+        lines.append("".join(current).strip())
+
+    lines = [line for line in lines if line]
+    if not lines:
+        return [text.strip() or text]
+
+    if max_lines is not None and len(lines) > max_lines:
+        lines = lines[:max_lines]
+
+    consumed = "".join(lines)
+    if ellipsize and len(consumed) < len(text):
+        lines[-1] = lines[-1].rstrip("，、。：:；;,. ") + "…"
+    return lines
+
+
+def _wrap_timeline_text(text: str, max_units: int = 22,
+                        max_lines: int | None = 2,
+                        ellipsize: bool = True) -> list[str]:
+    """Wrap mixed CJK/ASCII text into short lines for timeline cards."""
+    return _wrap_text_to_width(
+        text,
+        max_px=max_units * 5.6,
+        font_size=11,
+        max_lines=max_lines,
+        ellipsize=ellipsize,
+    )
+
+def _compact_swimlane_tag(label: str) -> str:
+    compact_map = {
+        "会话交互": "会话",
+        "技能调用": "技能",
+        "AI协同办公套件层": "AI套件",
+        "AI日程协同": "日程",
+        "AI会议协同": "会议",
+        "AI文档协同": "文档",
+        "AI流程协同": "流程",
+        "AI业务协同": "业务",
+        "Harness支撑层": "Harness",
+        "Harness基础能力": "基础能力",
+        "Agent运行时": "Agent",
+        "API网关": "网关",
+        "ERP业务层": "ERP",
+        "财务管理": "财务",
+        "供应链管理": "供应链",
+        "HR管理": "HR",
+        "数据存储": "存储",
+        "数据分析": "分析",
+        "AI数据底座": "数据底座",
+    }
+    return compact_map.get(label, label)
+def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme: str = "light") -> None:
+    """Timeline-style evolution diagram for date-driven product changes."""
+    industry = blueprint.get("meta", {}).get("industry", "") or None
+    colors = _resolve_theme(theme, industry=industry)
+    title = blueprint.get("meta", {}).get("title", "Business Blueprint")
+    lib = blueprint.get("library", {})
+    flow_steps = list(lib.get("flowSteps", []))
+    actors = {a["id"]: a.get("name", a["id"]) for a in lib.get("actors", [])}
+    capabilities = {c["id"]: c.get("name", c["id"]) for c in lib.get("capabilities", [])}
+    systems = {s["id"]: s.get("name", s["id"]) for s in lib.get("systems", [])}
+
+    if not flow_steps:
+        empty_svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="960" height="280" font-family="{FONT}">'
+            f'{_svg_defs(colors=colors, theme=theme)}'
+            f'<rect width="960" height="280" fill="{colors["bg"]}"/>'
+            f'{_title_svg(title, "演进时间线", 960, colors=colors)}'
+            f'<text x="480" y="168" text-anchor="middle" font-size="16" fill="{colors["text_sub"]}">No flow steps available</text>'
+            f'</svg>'
+        )
+        target.write_text(empty_svg, encoding="utf-8")
+        return
+
+    def _sort_key(item: tuple[int, dict[str, Any]]) -> tuple[int, str, int]:
+        idx, step = item
+        seq = int(step.get("seqIndex", idx))
+        date_label, _ = _split_timeline_step_name(step.get("name", ""))
+        return seq, date_label, idx
+
+    ordered_steps = [step for _, step in sorted(enumerate(flow_steps), key=_sort_key)]
+
+    PAD_X = 56
+    PAD_Y = 30
+    TITLE_H = 66
+    AXIS_Y = 172
+    CARD_Y = 210
+    CARD_W = 260
+    CARD_H = 210
+    CARD_GAP = 26
+    canvas_w = max(1120, PAD_X * 2 + len(ordered_steps) * CARD_W + max(0, len(ordered_steps) - 1) * CARD_GAP)
+    canvas_h = 500
+
+    accent_release = "#DC2626"
+    accent_release_fill = "#FEF2F2"
+    accent_default = colors["cap_stroke"]
+    accent_default_fill = colors["canvas"]
+    accent_secondary = "#4338CA"
+    accent_secondary_fill = "#EEF2FF"
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" '
+        f'viewBox="0 0 {canvas_w} {canvas_h}" font-family="{FONT}">',
+        _svg_defs(colors=colors, theme=theme),
+        f'<rect width="{canvas_w}" height="{canvas_h}" fill="{colors["bg"]}"/>',
+        _title_svg(title, "演进时间线", canvas_w, colors=colors),
+    ]
+
+    title_bottom = PAD_Y + TITLE_H
+    left = PAD_X + 20
+    right = canvas_w - PAD_X - 20
+    parts.append(
+        f'<line x1="{left}" y1="{AXIS_Y}" x2="{right}" y2="{AXIS_Y}" '
+        f'stroke="{colors["border"]}" stroke-width="4" stroke-linecap="round"/>'
+    )
+
+    centers: list[float] = []
+    timeline_start = (canvas_w - (len(ordered_steps) * CARD_W + (len(ordered_steps) - 1) * CARD_GAP)) / 2
+
+    for idx, step in enumerate(ordered_steps):
+        card_x = timeline_start + idx * (CARD_W + CARD_GAP)
+        center_x = card_x + CARD_W / 2
+        centers.append(center_x)
+
+        date_label, step_title = _split_timeline_step_name(step.get("name", ""))
+        actor_name = actors.get(step.get("actorId", ""), "未标注对象")
+        capability_names = [capabilities.get(cid, cid) for cid in step.get("capabilityIds", [])[:2]]
+        system_names = [systems.get(sid, sid) for sid in step.get("systemIds", [])[:3]]
+        is_release = "发布" in step_title or "上线" in step_title or "套件" in step_title
+        stroke = accent_release if is_release else (accent_secondary if idx % 2 else accent_default)
+        fill = accent_release_fill if is_release else (accent_secondary_fill if idx % 2 else accent_default_fill)
+
+        parts.append(
+            f'<circle cx="{center_x}" cy="{AXIS_Y}" r="11" fill="{colors["canvas"]}" '
+            f'stroke="{stroke}" stroke-width="4"/>'
+        )
+        parts.append(
+            f'<line x1="{center_x}" y1="{AXIS_Y + 12}" x2="{center_x}" y2="{CARD_Y}" '
+            f'stroke="{stroke}" stroke-width="2" stroke-dasharray="5,4" opacity="0.75"/>'
+        )
+
+        chip_w = 96
+        chip_x = center_x - chip_w / 2
+        parts.append(
+            f'<rect x="{chip_x}" y="{AXIS_Y - 40}" width="{chip_w}" height="24" rx="12" '
+            f'fill="{colors["canvas"]}" stroke="{stroke}" stroke-width="1.5"/>'
+        )
+        parts.append(
+            f'<text x="{center_x}" y="{AXIS_Y - 24}" text-anchor="middle" font-size="11" '
+            f'fill="{stroke}" font-weight="700">{_esc(date_label or f"阶段 {idx + 1}")}</text>'
+        )
+
+        parts.append(
+            f'<rect x="{card_x}" y="{CARD_Y}" width="{CARD_W}" height="{CARD_H}" rx="18" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+        )
+
+        parts.append(
+            f'<rect x="{card_x + 18}" y="{CARD_Y + 16}" width="68" height="24" rx="12" '
+            f'fill="{colors["canvas"]}" fill-opacity="0.95"/>'
+            f'<text x="{card_x + 52}" y="{CARD_Y + 32}" text-anchor="middle" font-size="11" '
+            f'fill="{stroke}" font-weight="700">阶段 {idx + 1}</text>'
+        )
+
+        title_lines = _wrap_timeline_text(step_title, max_units=18, max_lines=2)
+        title_y = CARD_Y + 72
+        parts.append(
+            f'<text x="{card_x + 22}" y="{title_y}" font-size="18" fill="{colors["text_main"]}" font-weight="700">'
+        )
+        for line_index, line in enumerate(title_lines):
+            dy = 0 if line_index == 0 else 22
+            parts.append(f'<tspan x="{card_x + 22}" dy="{dy}">{_esc(line)}</tspan>')
+        parts.append('</text>')
+
+        actor_y = CARD_Y + 122
+        parts.append(
+            f'<text x="{card_x + 22}" y="{actor_y}" font-size="11" fill="{colors["text_sub"]}" font-weight="600">定位对象</text>'
+        )
+        parts.append(
+            f'<text x="{card_x + 90}" y="{actor_y}" font-size="11" fill="{colors["text_main"]}">{_esc(actor_name)}</text>'
+        )
+
+        if capability_names:
+            parts.append(
+                f'<text x="{card_x + 22}" y="{actor_y + 28}" font-size="11" fill="{colors["text_sub"]}" font-weight="600">关键变化</text>'
+            )
+            parts.append(
+                f'<text x="{card_x + 90}" y="{actor_y + 28}" font-size="11" fill="{colors["text_main"]}">{_esc(" / ".join(capability_names))}</text>'
+            )
+
+        pill_y = CARD_Y + 170
+        pill_x = card_x + 22
+        for s_idx, sys_name in enumerate(system_names):
+            pill_label = sys_name[:12] + "…" if len(sys_name) > 12 else sys_name
+            # SVG text tends to render mixed CJK/ASCII a bit wider than the
+            # simple 8/6 estimate, so keep pill sizing intentionally conservative.
+            pill_w = max(78, 24 + sum(10 if ord(c) > 127 else 7 for c in pill_label))
+            if pill_x + pill_w > card_x + CARD_W - 18:
+                pill_x = card_x + 22
+                pill_y += 28
+            parts.append(
+                f'<rect x="{pill_x}" y="{pill_y}" width="{pill_w}" height="22" rx="11" '
+                f'fill="{colors["canvas"]}" fill-opacity="0.96" stroke="{stroke}" stroke-width="1"/>'
+                f'<text x="{pill_x + pill_w / 2}" y="{pill_y + 15}" text-anchor="middle" font-size="10" '
+                f'fill="{stroke}" font-weight="600">{_esc(pill_label)}</text>'
+            )
+            pill_x += pill_w + 8
+
+    scope_text = "仅含官网明确产品发布、定位强化与场景深化"
+    parts.append(
+        f'<text x="{canvas_w / 2}" y="{canvas_h - 22}" text-anchor="middle" font-size="12" '
+        f'fill="{colors["text_sub"]}">{_esc(scope_text)}</text>'
+    )
+    parts.append("</svg>")
+    target.write_text("\n".join(parts), encoding="utf-8")
+
+
+
+def export_layer_poster_svg(blueprint: dict[str, Any], target: Path, theme: str = "dark") -> None:
+    """Poster-style layered product blueprint view for product architecture storytelling."""
+    colors = _resolve_theme(theme, blueprint.get("meta", {}).get("industry", "") or None)
+    title = blueprint.get("meta", {}).get("title", "Business Blueprint")
+    systems = blueprint.get("library", {}).get("systems", [])
+    if not systems:
+        target.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="300"></svg>', encoding='utf-8')
+        return
+
+    layer_order: list[str] = []
+    layers: dict[str, list[dict[str, Any]]] = {}
+    for system in systems:
+        layer = system.get("layer") or "未分层"
+        if layer not in layers:
+            layer_order.append(layer)
+            layers[layer] = []
+        layers[layer].append(system)
+
+    PAD_X = 48
+    PAD_Y = 28
+    TITLE_H = 84
+    LAYER_LABEL_W = 220
+    CARD_W = 264
+    CARD_H = 124
+    CARD_GAP = 18
+    ROW_GAP = 18
+    BAND_PAD_X = 18
+    BAND_PAD_Y = 18
+    BAND_GAP = 18
+    CONTENT_W = 1440 - PAD_X * 2 - LAYER_LABEL_W - 24
+    MAX_COLS = max(1, min(3, CONTENT_W // (CARD_W + CARD_GAP)))
+    canvas_w = 1440
+
+    layer_palette = [
+        ("#22D3EE", "#0E2A3D", "#083344"),
+        ("#FBBF24", "#2A2010", "#78350F"),
+        ("#34D399", "#0E2E1F", "#064E3B"),
+        ("#4ADE80", "#0F2518", "#14532D"),
+        ("#A78BFA", "#1E1535", "#4C1D95"),
+        ("#FB7185", "#2A1018", "#881337"),
+    ]
+
+    band_layouts: list[dict[str, Any]] = []
+    current_y = PAD_Y + TITLE_H + 18
+    for idx, layer in enumerate(layer_order):
+        items = layers[layer]
+        rows = max(1, math.ceil(len(items) / MAX_COLS))
+        band_h = BAND_PAD_Y * 2 + rows * CARD_H + (rows - 1) * ROW_GAP
+        band_layouts.append({
+            "layer": layer,
+            "items": items,
+            "y": current_y,
+            "h": band_h,
+            "palette": layer_palette[idx % len(layer_palette)],
+        })
+        current_y += band_h + BAND_GAP
+
+    canvas_h = current_y + 54
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" viewBox="0 0 {canvas_w} {canvas_h}" font-family="{FONT}">',
+        _svg_defs(colors=colors, theme=theme),
+        f'<rect width="{canvas_w}" height="{canvas_h}" fill="{colors["bg"]}"/>',
+    ]
+    if theme == "dark":
+        parts.append(f'<rect width="{canvas_w}" height="{canvas_h}" fill="url(#grid)"/>')
+
+    title_w = canvas_w - PAD_X * 2
+    parts.append(
+        f'<g class="title-block">'
+        f'<rect x="{PAD_X}" y="{PAD_Y}" width="{title_w}" height="64" rx="8" fill="{colors["canvas"]}" stroke="{colors["border"]}" stroke-width="1.2"/>'
+        f'<text x="{PAD_X + 20}" y="{PAD_Y + 28}" font-size="28" font-weight="800" fill="{colors["text_main"]}">{_esc(title)}</text>'
+        f'<text x="{PAD_X + 20}" y="{PAD_Y + 50}" font-size="12" fill="{colors["text_sub"]}" letter-spacing="0.5">产品蓝图海报 · 用户入口 → AI协同 → Harness支撑 → ERP业务 → 数据闭环</text>'
+        f'</g>'
+    )
+
+    spine_x = PAD_X + 96
+    spine_top = band_layouts[0]["y"] + 10 if band_layouts else PAD_Y + TITLE_H
+    spine_bottom = band_layouts[-1]["y"] + band_layouts[-1]["h"] - 10 if band_layouts else spine_top
+    parts.append(
+        f'<line x1="{spine_x}" y1="{spine_top}" x2="{spine_x}" y2="{spine_bottom}" stroke="{colors["border"]}" stroke-width="2" stroke-dasharray="6,6" opacity="0.8"/>'
+    )
+
+    for idx, band in enumerate(band_layouts):
+        accent, card_fill, accent_dark = band["palette"]
+        band_x = PAD_X + 8
+        band_y = band["y"]
+        band_w = canvas_w - PAD_X * 2 - 16
+        band_h = band["h"]
+        label_x = band_x + 22
+        label_y = band_y + 26
+        content_x = band_x + LAYER_LABEL_W
+        content_y = band_y + BAND_PAD_Y
+        content_w = band_w - LAYER_LABEL_W - 18
+
+        layer_match = _re.match(r'^(第[^\s]+)\s+(.*)$', band["layer"])
+        layer_prefix = layer_match.group(1) if layer_match else f'第{idx + 1}层'
+        layer_title = layer_match.group(2) if layer_match else band["layer"]
+        layer_summary = " / ".join(system["name"] for system in band["items"])
+
+        parts.append(
+            f'<rect x="{band_x}" y="{band_y}" width="{band_w}" height="{band_h}" rx="18" fill="{card_fill}" fill-opacity="0.28" stroke="{accent}" stroke-width="1.2"/>'
+        )
+        parts.append(
+            f'<rect x="{band_x + 14}" y="{band_y + 14}" width="{LAYER_LABEL_W - 28}" height="{band_h - 28}" rx="14" fill="{colors["canvas"]}" fill-opacity="0.92" stroke="{colors["border"]}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{label_x}" y="{label_y}" font-size="12" font-weight="800" fill="{accent}" letter-spacing="0.8">{_esc(layer_prefix)}</text>'
+            f'<text x="{label_x}" y="{label_y + 28}" font-size="24" font-weight="800" fill="{colors["text_main"]}">{_esc(layer_title)}</text>'
+            f'<text x="{label_x}" y="{label_y + 54}" font-size="11" fill="{colors["text_sub"]}">{_esc(layer_summary[:56])}</text>'
+        )
+
+        for item_idx, system in enumerate(band["items"]):
+            row = item_idx // MAX_COLS
+            col = item_idx % MAX_COLS
+            row_items = band["items"][row * MAX_COLS:(row + 1) * MAX_COLS]
+            row_w = len(row_items) * CARD_W + max(0, len(row_items) - 1) * CARD_GAP
+            row_start_x = int(content_x + max(0, (content_w - row_w) / 2))
+            cx = row_start_x + col * (CARD_W + CARD_GAP)
+            cy = content_y + row * (CARD_H + ROW_GAP)
+            features = system.get("features", [])[:3]
+            parts.append(
+                f'<rect x="{cx}" y="{cy}" width="{CARD_W}" height="{CARD_H}" rx="14" fill="{colors["canvas"]}" stroke="{accent}" stroke-width="1.8"/>'
+            )
+            parts.append(
+                f'<rect x="{cx + 16}" y="{cy + 16}" width="68" height="18" rx="9" fill="{accent_dark}"/>'
+                f'<text x="{cx + 50}" y="{cy + 29}" text-anchor="middle" font-size="9" font-weight="700" fill="{accent}">MODULE</text>'
+            )
+            parts.append(
+                f'<text x="{cx + 16}" y="{cy + 60}" font-size="24" font-weight="800" fill="{colors["text_main"]}">{_esc(system.get("name", ""))}</text>'
+            )
+            feature_gap = 16
+            feature_start_y = min(cy + 84, cy + CARD_H - 18 - max(0, len(features) - 1) * feature_gap)
+            for line_idx, feature in enumerate(features):
+                fy = feature_start_y + line_idx * feature_gap
+                parts.append(
+                    f'<circle cx="{cx + 20}" cy="{fy - 4}" r="3" fill="{accent}"/>'
+                    f'<text x="{cx + 32}" y="{fy}" font-size="12" fill="{accent if line_idx == len(features) - 1 else colors["text_sub"]}">{_esc(feature)}</text>'
+                )
+
+
+    parts.append(
+        f'<text x="{canvas_w / 2}" y="{canvas_h - 22}" text-anchor="middle" font-size="12" fill="{colors["text_sub"]}">云之家 V12 产品蓝图 · 海报视图</text>'
+    )
+    parts.append('</svg>')
     target.write_text("\n".join(parts), encoding="utf-8")

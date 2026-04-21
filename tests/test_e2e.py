@@ -103,3 +103,48 @@ def test_export_and_validate(tmp_path: Path) -> None:
     )
     payload = json.loads(validation.stdout)
     assert "summary" in payload
+
+
+def test_project_generates_projection_json(tmp_path: Path) -> None:
+    blueprint_path = tmp_path / "solution.blueprint.json"
+    blueprint = {
+        "version": "1.0",
+        "meta": {
+            "title": "Retail Blueprint",
+            "industry": "retail",
+            "revisionId": "rev-1",
+            "lastModifiedAt": "2026-04-20T12:00:00Z",
+        },
+        "context": {
+            "goals": ["Reduce checkout queue time"],
+            "scope": ["Store operations"],
+            "assumptions": [],
+            "constraints": [],
+            "sourceRefs": [],
+            "clarifyRequests": [],
+            "clarifications": [],
+        },
+        "library": {
+            "capabilities": [],
+            "actors": [],
+            "flowSteps": [],
+            "systems": [],
+        },
+        "relations": [],
+        "views": [],
+        "editor": {"fieldLocks": {}, "theme": "enterprise-default"},
+        "artifacts": {},
+    }
+    blueprint_path.write_text(json.dumps(blueprint, ensure_ascii=False), encoding="utf-8")
+
+    subprocess.run(
+        [sys.executable, "-m", "business_blueprint.cli", "--project", str(blueprint_path)],
+        cwd=ROOT,
+        check=True,
+    )
+
+    projection_path = tmp_path / "solution.projection.json"
+    assert projection_path.exists()
+    projection = json.loads(projection_path.read_text(encoding="utf-8"))
+    assert projection["meta"]["adapterVersion"] == "v1"
+    assert projection["summary"]["goals"] == ["Reduce checkout queue time"]

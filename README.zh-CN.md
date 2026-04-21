@@ -82,6 +82,7 @@ cd kai-business-blueprint && pip install -e .
 | 参数 | 说明 |
 |------|------|
 | `--plan "文本"` | 将原始文本解析为标准蓝图 JSON |
+| `--project <blueprint.json>` | 派生 canonical `solution.projection.json`，供下游技能消费 |
 | `--generate <输出>` | 生成 JSON + 静态 HTML 查看器包 |
 | `--edit <blueprint.json>` | 刷新现有蓝图的查看器（保留人工编辑） |
 | `--export <blueprint.json>` | 导出 SVG、draw.io、Excalidraw、Mermaid 图表 |
@@ -118,6 +119,11 @@ business-blueprint --validate solution.blueprint.json
 business-blueprint --export solution.blueprint.json
 ```
 
+**准备下游 machine handoff：**
+```bash
+business-blueprint --project solution.blueprint.json
+```
+
 ---
 
 ## 输出产物
@@ -125,10 +131,11 @@ business-blueprint --export solution.blueprint.json
 | 文件 | 角色 |
 |------|------|
 | `solution.blueprint.json` | 标准 IR——唯一事实来源 |
+| `solution.projection.json` | 规范化的下游机器投影 |
 | `solution.viewer.html` | 静态查看器 + 轻量编辑器 |
 | `solution.exports/` | SVG、draw.io、Excalidraw、Mermaid 导出 |
 | `solution.patch.jsonl` | 编辑追溯日志（JSON patches） |
-| `solution.handoff.json` | AI 交接版本清单 |
+| `solution.handoff.json` | viewer 修订版本清单 |
 
 ### SVG 架构导出
 
@@ -155,6 +162,7 @@ kai-business-blueprint/
 │   ├── cli.py                    # 命令行入口
 │   ├── generate.py               # 从文本生成蓝图
 │   ├── model.py                  # 数据模型与顶层结构
+│   ├── projection.py             # 下游 projection 构建器
 │   ├── validate.py               # 机器可读验证
 │   ├── clarify.py                # 澄清请求构建器
 │   ├── normalize.py              # 实体解析与同义词合并
@@ -191,18 +199,23 @@ kai-business-blueprint/
 
 ## 面向 AI 智能体
 
-其他技能可以消费蓝图产物：
+其他技能应通过提示词编排来消费蓝图产物，而不是通过 viewer handoff manifest：
 
 ```
-# report-creator：将蓝图摘要嵌入商业报告
-/report --from blueprint-summary.md --theme corporate-blue
+# 1. 先准备 machine artifacts
+business-blueprint --plan solution.blueprint.json --from "..."
+business-blueprint --project solution.blueprint.json
 
-# slide-creator：从蓝图构建演示文稿
-/slide-creator --from solution.handoff.json
+# 2. 再用提示词驱动 report-creator
+"Use solution.blueprint.json and solution.projection.json to generate a report IR first. Do not render HTML yet."
 
-# 从 relations 生成 PlantUML
-# 解析 solution.blueprint.json 中的 relations → 生成 PlantUML 语法
+# 3. 再用提示词驱动 slide-creator
+"Use solution.blueprint.json and solution.projection.json to generate PLANNING.md first. Do not generate HTML yet."
 ```
+
+可直接复用的提示词模板见 [references/prompt-orchestration-templates.md](references/prompt-orchestration-templates.md)。
+
+`solution.handoff.json` 只用于 viewer manifest，不要把它当作 report / slide 的输入。
 
 **提取结构化数据：**
 ```python
@@ -211,12 +224,13 @@ import json
 with open("solution.blueprint.json") as f:
     bp = json.load(f)
 
-# 实体
-for sys in bp["entities"].get("applicationSystems", []):
+# 系统
+for sys in bp["library"].get("systems", []):
     print(f"系统: {sys['name']}")
 
-for cap in bp["entities"].get("businessCapabilities", []):
-    print(f"能力: {cap['name']} (支撑 {cap['systemId']})")
+# 能力
+for cap in bp["library"].get("capabilities", []):
+    print(f"能力: {cap['name']}")
 
 # 关系
 for rel in bp["relations"]:
@@ -243,6 +257,8 @@ for rel in bp["relations"]:
 ---
 
 ## 版本日志
+
+**v0.9.0** — Canonical projection 发布：新增 `--project` 生成 `solution.projection.json`；补齐面向 report/slide 下游 skill 的 prompt-native 编排模板；明确非标准图形默认回退 `freeflow`；并完成一整轮 SVG 导出质量升级，覆盖海报图、泳道图、层次图、演进图，包括暗黑主题修复、标签避让、按宽度换行、卡片居中和新增回归测试。
 
 **v0.8.0** — 技能重命名：从 `business-blueprint-skill` 更名为 `kai-business-blueprint`；更新所有 GitHub 链接、安装路径与文档引用。
 

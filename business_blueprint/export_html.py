@@ -44,6 +44,8 @@ def _build_architecture_svg(blueprint: dict[str, Any], colors: dict, theme: str)
     """Build architecture SVG for the HTML viewer.
 
     Uses free-flow L→R data flow layout by default.
+    When no standard export template applies, viewer output must stay on
+    freeflow rather than silently switching to another generic view type.
     """
     import tempfile
     from .export_svg import export_svg_auto
@@ -126,7 +128,7 @@ def _build_description_section(blueprint: dict[str, Any]) -> str:
     </div>"""
 
 
-def export_html_viewer(blueprint: dict[str, Any], target: Path, theme: str = "dark") -> None:
+def export_html_viewer(blueprint: dict[str, Any], target: Path, theme: str = "light") -> None:
     """Generate a self-contained HTML viewer with inline architecture SVG."""
     colors = _resolve_theme(theme)
     title = blueprint.get("meta", {}).get("title", "Business Blueprint")

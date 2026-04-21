@@ -82,6 +82,7 @@ cd kai-business-blueprint && pip install -e .
 | Flag | Purpose |
 |------|---------|
 | `--plan "text"` | Parse raw text into canonical blueprint JSON |
+| `--project <blueprint.json>` | Derive canonical `solution.projection.json` for downstream skills |
 | `--generate <output>` | Generate JSON + static HTML viewer package |
 | `--edit <blueprint.json>` | Refresh viewer for an existing blueprint (preserves human edits) |
 | `--export <blueprint.json>` | Export diagrams (default: free-flow SVG + HTML viewer) |
@@ -121,6 +122,11 @@ business-blueprint --validate solution.blueprint.json
 business-blueprint --export solution.blueprint.json
 ```
 
+**Prepare downstream machine handoff:**
+```bash
+business-blueprint --project solution.blueprint.json
+```
+
 ---
 
 ## Outputs
@@ -128,10 +134,11 @@ business-blueprint --export solution.blueprint.json
 | File | Role |
 |------|------|
 | `solution.blueprint.json` | Canonical IR — single source of truth |
+| `solution.projection.json` | Canonical downstream machine projection |
 | `solution.viewer.html` | Static viewer + light editor |
 | `solution.exports/` | SVG, draw.io, Excalidraw, Mermaid exports |
 | `solution.patch.jsonl` | Edit traceability log (JSON patches) |
-| `solution.handoff.json` | Revision manifest for AI handoff |
+| `solution.handoff.json` | Viewer revision manifest |
 
 ### SVG Architecture Export
 
@@ -157,6 +164,7 @@ kai-business-blueprint/
 │   ├── cli.py                    # CLI entry point
 │   ├── generate.py               # Blueprint generation from text
 │   ├── model.py                  # Data model & top-level shape
+│   ├── projection.py             # Downstream projection builder
 │   ├── validate.py               # Machine-readable validation
 │   ├── clarify.py                # Clarification request builder
 │   ├── normalize.py              # Entity resolution & synonym merging
@@ -193,18 +201,23 @@ Run `--validate` to check all rules. Warnings indicate potential issues (e.g., a
 
 ## For AI Agents
 
-Other skills consume blueprint artifacts:
+Other skills should consume blueprint artifacts through prompt orchestration, not through the viewer handoff manifest.
 
 ```
-# report-creator: embed blueprint summary in a business report
-/report --from blueprint-summary.md --theme corporate-blue
+# 1. Prepare the machine artifacts
+business-blueprint --plan solution.blueprint.json --from "..."
+business-blueprint --project solution.blueprint.json
 
-# slide-creator: build a presentation from blueprint
-/slide-creator --from solution.handoff.json
+# 2. Prompt report-creator with the blueprint/projection artifacts
+"Use solution.blueprint.json and solution.projection.json to generate a report IR first. Do not render HTML yet."
 
-# Generate PlantUML from relations
-# Parse relations from solution.blueprint.json → generate PlantUML syntax
+# 3. Prompt slide-creator with the blueprint/projection artifacts
+"Use solution.blueprint.json and solution.projection.json to generate PLANNING.md first. Do not generate HTML yet."
 ```
+
+See [references/prompt-orchestration-templates.md](references/prompt-orchestration-templates.md) for copy-paste prompt templates.
+
+`solution.handoff.json` is only a viewer manifest. Do not use it as report/deck input.
 
 **Extracting structured data:**
 ```python
@@ -213,12 +226,13 @@ import json
 with open("solution.blueprint.json") as f:
     bp = json.load(f)
 
-# Entities
-for sys in bp["entities"].get("applicationSystems", []):
+# Systems
+for sys in bp["library"].get("systems", []):
     print(f"System: {sys['name']}")
 
-for cap in bp["entities"].get("businessCapabilities", []):
-    print(f"Capability: {cap['name']} (supports {cap['systemId']})")
+# Capabilities
+for cap in bp["library"].get("capabilities", []):
+    print(f"Capability: {cap['name']}")
 
 # Relations
 for rel in bp["relations"]:
@@ -245,6 +259,8 @@ for rel in bp["relations"]:
 ---
 
 ## Version History
+
+**v0.9.0** — Canonical projection release: add `solution.projection.json` generation via `--project`; formalize prompt-native orchestration templates for report/slide downstream skills; strengthen export routing rules so non-standard diagram requests fall back to free-flow; and ship substantial SVG quality upgrades across poster, swimlane, hierarchy, and evolution views, including dark-theme fixes, label collision handling, width-aware title wrapping, centered card rows, and new regression coverage.
 
 **v0.8.0** — Skill rename: rebranded from `business-blueprint-skill` to `kai-business-blueprint`; updated all GitHub URLs, install paths, and documentation references.
 

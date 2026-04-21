@@ -11,3 +11,4 @@ demos/common-demo.txt
 .xiaok/
 *.blueprint.html
 *.blueprint.exports/
+projects/workspace/

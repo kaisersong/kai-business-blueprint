@@ -11,7 +11,8 @@ from .export_html import export_html_viewer
 from .export_mermaid import export_mermaid
 from .export_svg import export_svg, export_svg_auto, export_product_tree_svg, export_matrix_svg, export_capability_map_svg, export_swimlane_flow_svg
 from .generate import write_plan_output
-from .model import load_json
+from .model import load_json, write_json
+from .projection import build_narrative_projection, default_projection_path
 from .validate import validate_blueprint
 from .viewer import write_viewer_package
 
@@ -19,6 +20,7 @@ from .viewer import write_viewer_package
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="business-blueprint")
     parser.add_argument("--plan", help="Generate only the canonical blueprint JSON.")
+    parser.add_argument("--project", help="Generate canonical projection JSON for downstream skills.")
     parser.add_argument(
         "--generate",
         help="Path to blueprint JSON. Generates free-flow HTML viewer.",
@@ -29,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--html", help="Generate self-contained HTML viewer with inline SVG.")
     parser.add_argument("--validate", help="Validate a blueprint and print JSON results.")
     parser.add_argument("--from", dest="from_path", help="Source text or file path.")
+    parser.add_argument("--output", help="Optional output path for projection generation.")
     parser.add_argument("--format", dest="export_format", default="svg",
                         help="Export format: svg (default: SVG + HTML viewer), drawio, excalidraw, mermaid.")
     _INDUSTRIES = ["common", "finance", "manufacturing", "retail"]
@@ -53,6 +56,16 @@ def main() -> int:
             print("Example: business-blueprint --plan output.json --from \"My requirements here\"", file=sys.stderr)
             return 1
         write_plan_output(Path(args.plan), source_text, args.industry, Path.cwd())
+        return 0
+
+    if args.project:
+        blueprint_path = Path(args.project)
+        projection = build_narrative_projection(
+            load_json(blueprint_path),
+            blueprint_path=blueprint_path,
+        )
+        output_path = Path(args.output) if args.output else default_projection_path(blueprint_path)
+        write_json(output_path, projection)
         return 0
 
     if args.generate:

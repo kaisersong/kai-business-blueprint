@@ -1,6 +1,6 @@
 ---
 name: kai-business-blueprint
-description: Use when turning presales requirements, meeting notes, or solution materials into editable business capability blueprints, swimlane flows, and application architecture diagrams. Use when generating blueprint JSON, static HTML viewers, or exporting to SVG, draw.io, Excalidraw, or Mermaid formats.
+description: Use when turning presales requirements, meeting notes, or solution materials into editable business capability blueprints, swimlane flows, and application architecture diagrams. Use when generating blueprint JSON, static HTML viewers, or exporting to SVG, draw.io, Excalidraw, or Mermaid formats. When no standard export template applies, default to free-flow output.
 ---
 
 # Business Blueprint Skill
@@ -13,6 +13,7 @@ All generated files (blueprint JSON, viewers, exports) go into `projects/workspa
 
 ```bash
 python -m business_blueprint.cli --plan projects/workspace/solution.blueprint.json --from "..."
+python -m business_blueprint.cli --project projects/workspace/solution.blueprint.json
 python -m business_blueprint.cli --export projects/workspace/solution.blueprint.json
 ```
 
@@ -98,11 +99,29 @@ python -m business_blueprint.cli --export <blueprint.json>
 
 This generates SVG + HTML viewer by default. Use `--format drawio|excalidraw|mermaid` for other formats.
 
+## Export View Selection Policy
+
+Treat export view choice as a routing decision, not a styling preference.
+
+- If a request matches a supported, standard export template, use that template.
+- If there is no standard export template for the requested diagram, fall back to `freeflow`.
+- Do **not** substitute `swimlane`, `matrix`, `product tree`, or other generic views just because they are available.
+- When embedding a blueprint diagram into a report or ad hoc analysis, `freeflow` is the safe default unless the user explicitly asks for a supported standard template.
+
+### Step 5: Generate downstream projection
+
+```bash
+python -m business_blueprint.cli --project <blueprint.json>
+```
+
+This generates `solution.projection.json`, the canonical machine projection consumed by downstream report/slide workflows.
+
 ## Workflow Decision Tree
 
 ```
 User provides raw requirements / meeting notes?
   → AI agent reads hints, extracts entities, writes blueprint JSON
+  → Optionally run --project for downstream machine handoff
   → Then run --export for visualization
 
 User needs diagram files (SVG, draw.io, etc.)?
@@ -110,6 +129,9 @@ User needs diagram files (SVG, draw.io, etc.)?
 
 User unsure about blueprint quality?
   → --validate
+
+User wants downstream report / slide generation?
+  → --project
 ```
 
 ## Commands
@@ -117,6 +139,7 @@ User unsure about blueprint quality?
 | Command | Description |
 |---------|-------------|
 | `--plan <path> --from <text>` | Generate empty blueprint JSON from source text (AI should prefer writing JSON directly) |
+| `--project <path>` | Generate canonical projection JSON for downstream skills |
 | `--export <path>` | Export SVG + HTML viewer (default), or use `--format` for other formats |
 | `--validate <path>` | Validate a blueprint and print JSON results |
 
@@ -133,10 +156,11 @@ User unsure about blueprint quality?
 
 This skill produces **semantic intermediate artifacts**. Downstream skills consume them:
 
-- `report-creator` consumes blueprint → assembles reports
-- `slide-creator` consumes blueprint → assembles presentations
+- `report-creator` consumes `solution.projection.json` → assembles reports
+- `slide-creator` consumes `solution.projection.json` → assembles presentations
 - Other skills may consume `relations` → generate PlantUML or other diagram syntax
 - Downstream skills should **never directly edit** `solution.blueprint.json`
+- `solution.handoff.json` is viewer-only metadata, not a downstream narrative input
 
 ## Sandbox Execution
 
@@ -155,6 +179,7 @@ When running in an isolated Python sandbox (Jupyter, notebook, cloud REPL) that 
    blueprint = load_json(blueprint_path)
    export_dir = blueprint_path.with_name("solution.exports")
    export_dir.mkdir(parents=True, exist_ok=True)
+   # Default fallback is freeflow unless a standard export template applies.
    export_svg_auto(blueprint, export_dir / "solution.svg")
    export_html_viewer(blueprint, blueprint_path.with_name("solution.blueprint.html"))
    ```
@@ -178,14 +203,22 @@ When user requests an architecture diagram (keywords: "架构图", "architecture
 4. Generate a self-contained HTML file with inline SVG following the design system rules.
 5. Write the output file to the same directory as the blueprint JSON.
 
+If the request does not match one of the supported standard templates above, stay on the default `freeflow` export path. Do not switch to another generic view type as a fallback.
+If a standard template would create a squeezed, clipped, or overcrowded diagram, stop using the fixed template geometry and fall back to `freeflow` or a wrapped multi-row layout.
+
 ### Generation Rules
-- Use dark mode by default (`#020617` bg + 40px grid)
+- Use dark mode by default (`#020617` bg + 40px grid). Only use light mode when the user explicitly asks for it.
 - L→R data flow: Clients(左) → Frontend → Backend → Database(右)
 - Map `systems[].category` to semantic colors from the design system
 - Map `systems[].properties.type == "aws"` → AWS Region boundary box
 - Map `systems[].properties.type == "k8s"` → Kubernetes Cluster boundary box
 - Use `flowSteps[].seqIndex` for L→R ordering
 - Component sizing: 0-1 cap = small(44px h), 2-4 = medium(80px h), 5+ = large(80px h)
+- Layout must be content-driven. Never force every node in a layer into one fixed row if that creates toothpaste-style squeezing.
+- When a layer has more than 3 peer nodes, or labels/features become tight, wrap into multiple rows or widen the canvas before shrinking the content.
+- Render users/actors as actor labels, badges, or lane headers by default. Do not render them as ordinary system cards unless the user explicitly asks for that visual treatment.
+- Legend must live in a bottom safe area and participate in canvas sizing. Never place the legend as a floating overlay in the top-right corner.
+- Final SVG/HTML height must be derived from the bottom-most node, legend, summary cards, and footer plus padding. Do not use fixed-height wrappers or `overflow: hidden` that can clip the last row.
 - Z-order: bg → grid → title → region → arrows → nodes → legend → cards → footer
 - Component border: `rx="8"`, `stroke-width="2"`
 - Region border: `rx="16"`, `stroke-dasharray="8,4"`, `opacity="0.4"`

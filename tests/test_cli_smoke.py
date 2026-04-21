@@ -19,5 +19,6 @@ def test_cli_help_lists_supported_commands() -> None:
     result = run_cli("--help")
     assert result.returncode == 0
     assert "--plan" in result.stdout
+    assert "--project" in result.stdout
     assert "--generate" in result.stdout
     assert "--validate" in result.stdout
