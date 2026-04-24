@@ -1,42 +1,34 @@
----
-title: 业务能力蓝图
----
-graph TD
-    cap-store-ops["门店运营"]
-    cap-membership["会员运营"]
-    cap-order["订单管理"]
-    sys-crm["CRM"]
-    sys-crm --> cap-membership
-    sys-crm --> cap-order
-    sys-pos["POS"]
-    sys-pos --> cap-order
-    sys-erp["ERP"]
-    sys-erp --> cap-store-ops
-
----
-title: 泳道流程图
----
-    subgraph actor-store-guide["门店导购"]
-        flow-membership-register["会员注册"]
-        flow-points-accrual["积分累计"]
+%% business-blueprint-skill v0.1.0
+flowchart TB
+    subgraph Systems["Application Systems"]
+        direction LR
+        sys-erp["ERP"]
+        sys-mes["MES"]
+        sys-wms["WMS"]
     end
-    subgraph actor-service["客服"]
-        flow-service-followup["售后跟进"]
+    subgraph 核心能力["核心能力"]
+        direction TB
+        subgraph row_核心能力_0[""]
+            direction LR
+            cap-production-plan["生产计划管理"]
+            cap-quality-control["质量管理"]
+            cap-warehouse["仓储管理"]
+            cap-supply-chain["供应链协同"]
+        end
     end
-    flow-membership-register --> flow-points-accrual
-    flow-points-accrual --> flow-service-followup
-
----
-title: 应用架构图
----
-graph TD
-    sys-crm["CRM"]
-    sys-pos["POS"]
-    sys-erp["ERP"]
-    cap-store-ops["门店运营"]
-    cap-membership["会员运营"]
-    cap-order["订单管理"]
-    sys-crm --> cap-membership
-    sys-crm --> cap-order
-    sys-pos --> cap-order
-    sys-erp --> cap-store-ops
+    subgraph Actors["参与者"]
+        direction LR
+        actor-production-mgr["生产经理"]
+        actor-quality-inspector["质检员"]
+        actor-warehouse-mgr["仓库管理员"]
+        actor-purchasing["采购专员"]
+    end
+    sys-erp --> cap-production-plan
+    sys-erp --> cap-warehouse
+    sys-mes --> cap-production-plan
+    sys-mes --> cap-quality-control
+    sys-wms --> cap-warehouse
+    actor-production-mgr --> flow-production-scheduling
+    actor-quality-inspector --> flow-incoming-inspection
+    actor-warehouse-mgr --> flow-warehouse-inbound
+    actor-purchasing --> flow-purchase-request
