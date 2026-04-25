@@ -3165,6 +3165,86 @@ def export_evolution_timeline_svg(blueprint: dict[str, Any], target: Path, theme
 
 
 
+def _infer_layer_from_system_name(name: str, category: str | None = None) -> str:
+    """Infer layer from system name and category.
+
+    For product blueprints: group by product capability level (not technical call chain)
+    For technical blueprints: group by technical architecture layers
+
+    Key distinction:
+    - "XX层" (layer definition) → technical architecture layer
+    - "XX服务" (service instance) → business service module
+
+    Priority: explicit category > name pattern
+    """
+    name_lower = name.lower()
+
+    # 1. Explicit category determines grouping strategy
+    if category == "layer":
+        # This system is a technical architecture LAYER DEFINITION
+        # Use its name directly as the layer name
+        if "客户端" in name or "前端" in name:
+            return "访问入口层"
+        if "网关" in name or "接入" in name:
+            return "接入网关层"
+        if "数据" in name or "存储" in name:
+            return "数据存储层"
+        if "基础" in name or "运维" in name:
+            return "基础设施层"
+        # For "微服务核心层" etc, use generic tech layer name
+        return name  # Direct use: "微服务核心层", "业务服务层" etc
+
+    if category == "service":
+        # This system is a business SERVICE INSTANCE
+        # Group by product capability level
+        if "开放平台" in name or "开放" in name:
+            return "平台能力层"
+        return "核心业务层"
+
+    # 2. Infer from name patterns
+    # Layer definition (ends with "层" or contains "layer")
+    if "层" in name and len(name) < 10:
+        # This is a layer DEFINITION, not a service instance
+        if "客户端" in name:
+            return "访问入口层"
+        if "网关" in name:
+            return "接入网关层"
+        if "数据" in name:
+            return "数据存储层"
+        if "基础" in name or "运维" in name:
+            return "基础设施层"
+        if "微服务" in name or "核心" in name:
+            return "平台基础层"  # Platform foundation services (user center, messaging, auth etc)
+        return name  # Use as-is
+
+    # Access layer (frontend/client)
+    if any(kw in name_lower for kw in ["客户端", "前端", "frontend", "client", "web", "mobile", "app", "小程序", "门户"]):
+        return "访问入口层"
+
+    # Gateway layer
+    if any(kw in name_lower for kw in ["网关", "gateway", "接入", "路由"]):
+        return "接入网关层"
+
+    # Data layer
+    if any(kw in name_lower for kw in ["数据", "存储", "database", "storage"]):
+        return "数据存储层"
+
+    # Infrastructure layer
+    if any(kw in name_lower for kw in ["基础设施", "运维", "监控", "日志"]):
+        return "基础设施层"
+
+    # Platform capability layer
+    if any(kw in name_lower for kw in ["开放平台", "开放", "platform", "api", "开发者"]):
+        return "平台能力层"
+
+    # Core business layer (all domain services)
+    if any(kw in name_lower for kw in ["服务", "模块", "系统"]):
+        return "核心业务层"
+
+    # Final fallback
+    return "应用服务层"
+
+
 def export_layer_poster_svg(blueprint: dict[str, Any], target: Path, theme: str = "dark") -> None:
     """Poster-style layered product blueprint view for product architecture storytelling."""
     colors = _resolve_theme(theme, blueprint.get("meta", {}).get("industry", "") or None)
@@ -3177,7 +3257,14 @@ def export_layer_poster_svg(blueprint: dict[str, Any], target: Path, theme: str 
     layer_order: list[str] = []
     layers: dict[str, list[dict[str, Any]]] = {}
     for system in systems:
-        layer = system.get("layer") or "未分层"
+        # Use explicit layer if present
+        layer = system.get("layer")
+
+        # Infer from category + name if no explicit layer
+        if not layer:
+            category = system.get("category") or system.get("properties", {}).get("category")
+            layer = _infer_layer_from_system_name(system.get("name", ""), category)
+
         if layer not in layers:
             layer_order.append(layer)
             layers[layer] = []
@@ -3263,7 +3350,11 @@ def export_layer_poster_svg(blueprint: dict[str, Any], target: Path, theme: str 
         layer_match = _re.match(r'^(第[^\s]+)\s+(.*)$', band["layer"])
         layer_prefix = layer_match.group(1) if layer_match else f'L{idx + 1}'
         layer_title = layer_match.group(2) if layer_match else band["layer"]
-        layer_summary = " / ".join(system["name"] for system in band["items"])
+        # Truncate summary to avoid overflow (show max 3 systems)
+        summary_systems = band["items"][:3]
+        layer_summary = " / ".join(system["name"] for system in summary_systems)
+        if len(band["items"]) > 3:
+            layer_summary += f" 等{len(band['items'])}个"
 
         parts.append(
             f'<rect x="{band_x}" y="{band_y}" width="{band_w}" height="{band_h}" rx="12" fill="{band_fill}" fill-opacity="{band_fill_opacity}" stroke="{accent}" stroke-width="1"/>'

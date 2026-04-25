@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .specs import build_excalidraw_spec, render_excalidraw
+from .renderers import build_excalidraw_spec, render_excalidraw
 
 _WATERMARK_KEY = "_business_blueprint_skill"
 

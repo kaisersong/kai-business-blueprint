@@ -42,7 +42,10 @@ Using the user's source material AND the industry hints checklist, extract:
 - **capabilities**: business capability areas (name, description)
 - **actors**: roles/people involved (name)
 - **flowSteps**: business process steps (name, actorId, capabilityIds, stepType)
-- **systems**: IT systems that support capabilities (name, description, capabilityIds)
+- **systems**: IT systems that support capabilities
+  - See `business_blueprint/docs/entities-schema.md` for all entity field definitions
+  - See `business_blueprint/docs/systems-schema.md` for systems category/layer rules
+  - See `business_blueprint/templates/common/seed.json` for field examples
 
 ### Step 3: Write the blueprint JSON
 

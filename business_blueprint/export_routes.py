@@ -42,16 +42,18 @@ def resolve_export_route(
             terminal_behavior="error",
         )
 
-    if _is_route_eligible("evolution", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
-        return ExportRouteDecision("evolution", "dated flow steps", "freeflow", "error")
-    if _is_route_eligible("poster", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
-        return ExportRouteDecision("poster", "layered systems", "freeflow", "error")
+    # Route priority: architecture-template > poster > hierarchy > freeflow > evolution > swimlane
+    # Swimlane is the most constrained scenario - lowest priority
     if _is_route_eligible("architecture-template", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
         return ExportRouteDecision("architecture-template", "categorized architecture systems", "freeflow", "error")
-    if _is_route_eligible("swimlane", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
-        return ExportRouteDecision("swimlane", "actor-owned flow steps", "freeflow", "error")
+    if _is_route_eligible("poster", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
+        return ExportRouteDecision("poster", "layered systems", "freeflow", "error")
     if _is_route_eligible("hierarchy", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
         return ExportRouteDecision("hierarchy", "hierarchical system grouping", "freeflow", "error")
+    if _is_route_eligible("evolution", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
+        return ExportRouteDecision("evolution", "dated flow steps", "freeflow", "error")
+    if _is_route_eligible("swimlane", systems=systems, flow_steps=flow_steps, actors=actors, blueprint=blueprint):
+        return ExportRouteDecision("swimlane", "actor-owned flow steps", "freeflow", "error")
     return ExportRouteDecision("freeflow", "generic fallback", None, "error")
 
 
@@ -88,11 +90,27 @@ def _is_route_eligible(
             or {"aws", "k8s"} & infra_types
         )
     if route == "poster":
-        return any(s.get("layer") for s in systems)
+        # Poster (layered systems) is for product blueprints with explicit layer structure
+        # Trigger: explicit layer field OR enough systems (≥4) suggesting layered architecture
+        return bool(systems) and (
+            any(s.get("layer") for s in systems)
+            or len(systems) >= 4  # Fallback: many systems suggest layered architecture
+        )
     if route == "swimlane":
+        # Swimlane is the MOST CONSTRAINED scenario - requires explicit flow orchestration
+        # Must have: ≥3 actors, ≥3 flow steps, AND flow steps with explicit sequence (inputRefs/outputRefs)
         actor_ids = {a.get("id") for a in actors if a.get("id")}
         actor_owned = [step for step in flow_steps if step.get("actorId") in actor_ids]
-        return len(actor_ids) >= 2 and len(actor_owned) >= 2
+        has_sequence = any(
+            step.get("inputRefs") or step.get("outputRefs")
+            for step in flow_steps
+        )
+        return (
+            len(actor_ids) >= 3
+            and len(actor_owned) >= 3
+            and len(flow_steps) >= 4
+            and has_sequence  # Must have explicit flow sequence
+        )
     if route == "hierarchy":
         has_segment = any(
             s.get("layer")
