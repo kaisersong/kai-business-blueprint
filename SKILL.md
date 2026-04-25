@@ -12,9 +12,9 @@ Use the Python scripts in this repository as the execution surface.
 All generated files (blueprint JSON, viewers, exports) go into `projects/workspace/` — not the repository root.
 
 ```bash
-python -m business_blueprint.cli --plan projects/workspace/solution.blueprint.json --from "..."
-python -m business_blueprint.cli --project projects/workspace/solution.blueprint.json
-python -m business_blueprint.cli --export projects/workspace/solution.blueprint.json
+python scripts/business_blueprint/cli.py --plan projects/workspace/solution.blueprint.json --from "..."
+python scripts/business_blueprint/cli.py --project projects/workspace/solution.blueprint.json
+python scripts/business_blueprint/cli.py --export projects/workspace/solution.blueprint.json
 ```
 
 ## Industry Selection
@@ -97,7 +97,7 @@ Write the JSON file directly to the output path. Use this schema:
 ### Step 4: Generate visualizations
 
 ```bash
-python -m business_blueprint.cli --export <blueprint.json>
+python scripts/business_blueprint/cli.py --export <blueprint.json>
 ```
 
 This generates SVG + HTML viewer by default. Use `--format drawio|excalidraw|mermaid` for other formats.
@@ -114,7 +114,7 @@ Treat export view choice as a routing decision, not a styling preference.
 ### Step 5: Generate downstream projection
 
 ```bash
-python -m business_blueprint.cli --project <blueprint.json>
+python scripts/business_blueprint/cli.py --project <blueprint.json>
 ```
 
 This generates `solution.projection.json`, the canonical machine projection consumed by downstream report/slide workflows.
@@ -145,6 +145,12 @@ User wants downstream report / slide generation?
 | `--project <path>` | Generate canonical projection JSON for downstream skills |
 | `--export <path>` | Export SVG + HTML viewer (default), or use `--format` for other formats |
 | `--validate <path>` | Validate a blueprint and print JSON results |
+
+**Execution**: Run directly as scripts:
+```bash
+python scripts/business_blueprint/cli.py --plan ...
+python scripts/business_blueprint/cli.py --export ...
+```
 
 ## Export Formats
 
