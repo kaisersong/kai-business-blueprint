@@ -255,5 +255,6 @@ Known deferred cases:
 - console-default encoding issues outside explicit UTF-8 execution paths
 
 Accepted workaround for encoding-sensitive runs:
-- use `python -m business_blueprint.cli`
+# Use scripts directly (pure Skill, no package structure)
+   subprocess.run(["python", "scripts/business_blueprint/cli.py", "--export", str(blueprint_path)])
 - set `PYTHONIOENCODING=utf-8` where needed
