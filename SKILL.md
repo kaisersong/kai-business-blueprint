@@ -175,26 +175,11 @@ This skill produces **semantic intermediate artifacts**. Downstream skills consu
 
 When running in an isolated Python sandbox (Jupyter, notebook, cloud REPL) that auto-installs dependencies:
 
-1. **The sandbox auto-installs `kai-business-blueprint` from PyPI.** Do NOT try to `pip install -e` or use `sys.path` hacks with `__file__` — `__file__` is undefined in Jupyter.
-
-2. **For `--export` (after blueprint JSON exists):**
+1. **The sandbox uses scripts directly.** Run execution scripts from the repository root:
    ```python
-   from pathlib import Path
-   from business_blueprint.model import load_json
-   from business_blueprint.export_svg import export_svg_auto
-   from business_blueprint.export_html import export_html_viewer
-
-   blueprint_path = Path("solution.blueprint.json")
-   blueprint = load_json(blueprint_path)
-   export_dir = blueprint_path.with_name("solution.exports")
-   export_dir.mkdir(parents=True, exist_ok=True)
-   # Default fallback is freeflow unless a standard export template applies.
-   export_svg_auto(blueprint, export_dir / "solution.svg")
-   export_html_viewer(blueprint, blueprint_path.with_name("solution.blueprint.html"))
+   import subprocess
+   subprocess.run(["python", "scripts/business_blueprint/cli.py", "--export", "solution.blueprint.json"])
    ```
-
-3. **Prohibited patterns in sandbox:**
-   - `__file__` — undefined in Jupyter
    - `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` — will raise NameError
    - `subprocess.run(["business-blueprint", ...])` — sandbox runs Python cells, not shell
    - `os.system()` — same reason
