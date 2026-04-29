@@ -62,7 +62,7 @@ def _build_architecture_svg(blueprint: dict[str, Any], colors: dict, theme: str)
 def _build_summary_cards(n_systems: int, n_capabilities: int,
                           n_actors: int, n_flow_steps: int,
                           sys_coverage: str) -> str:
-    """Build summary cards HTML."""
+    """Build summary cards HTML for architecture blueprints."""
     cards = [
         ("Systems", str(n_systems)),
         ("Capabilities", str(n_capabilities)),
@@ -78,6 +78,76 @@ def _build_summary_cards(n_systems: int, n_capabilities: int,
             <div class="card-label">{label}</div>
         </div>"""
     return f'<div class="summary-cards">{cards_html}\n    </div>'
+
+
+def _build_knowledge_summary_cards(blueprint: dict[str, Any]) -> str:
+    """Build summary cards HTML for domain-knowledge blueprints."""
+    knowledge = (blueprint.get("library", {}) or {}).get("knowledge", {}) or {}
+    relations = blueprint.get("relations", []) or []
+    clarify_requests = (blueprint.get("context", {}) or {}).get("clarifyRequests", []) or []
+
+    def _count(key: str) -> int:
+        items = knowledge.get(key, [])
+        return len(items) if isinstance(items, list) else 0
+
+    # Count entities flagged with non-empty self-check questions
+    flagged = 0
+    for entities in knowledge.values():
+        if not isinstance(entities, list):
+            continue
+        for ent in entities:
+            if not isinstance(ent, dict):
+                continue
+            sc = ent.get("_selfCheck") or {}
+            qs = sc.get("questions") if isinstance(sc, dict) else None
+            if isinstance(qs, list) and qs:
+                flagged += 1
+
+    cards = [
+        ("痛点", str(_count("painPoints"))),
+        ("策略", str(_count("strategies"))),
+        ("规则", str(_count("rules"))),
+        ("指标", str(_count("metrics"))),
+        ("实践", str(_count("practices"))),
+        ("误区", str(_count("pitfalls"))),
+        ("关系", str(len(relations))),
+        ("待澄清", str(len(clarify_requests))),
+        ("自检待确认", str(flagged)),
+    ]
+    cards_html = ""
+    for label, value in cards:
+        cards_html += f"""
+        <div class="summary-card">
+            <div class="card-value">{value}</div>
+            <div class="card-label">{label}</div>
+        </div>"""
+    return f'<div class="summary-cards">{cards_html}\n    </div>'
+
+
+def _build_clarify_section(blueprint: dict[str, Any]) -> str:
+    """For knowledge blueprints, list clarifyRequests so the user knows what to verify."""
+    requests = (blueprint.get("context", {}) or {}).get("clarifyRequests", []) or []
+    if not requests:
+        return ""
+    items = ""
+    for req in requests:
+        if not isinstance(req, dict):
+            continue
+        question = _esc(req.get("question", ""))
+        target = _esc(req.get("targetEntityId", ""))
+        rationale = _esc(req.get("rationale", ""))
+        items += f"""
+        <li>
+            <div style="font-weight:600;margin-bottom:4px;">→ {target}</div>
+            <div style="margin-bottom:4px;">{question}</div>
+            <div style="color:#6B7280;font-size:12px;">{rationale}</div>
+        </li>"""
+    return f"""
+    <div class="description-section">
+        <h2 class="description-title">待澄清的问题（pitch 前请回答）</h2>
+        <ul style="list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;">{items}
+        </ul>
+    </div>"""
 
 
 def _build_description_section(blueprint: dict[str, Any]) -> str:
@@ -129,20 +199,38 @@ def _build_description_section(blueprint: dict[str, Any]) -> str:
 
 
 def export_html_viewer(blueprint: dict[str, Any], target: Path, theme: str = "light") -> None:
-    """Generate a self-contained HTML viewer with inline architecture SVG."""
+    """Generate a self-contained HTML viewer with inline SVG.
+
+    Branches on ``meta.blueprintType``:
+    - ``architecture`` (default): standard summary cards (Systems/Capabilities/...)
+    - ``domain-knowledge``: knowledge summary cards (痛点/策略/...) + clarifyRequests
+    """
+    from export_knowledge import is_knowledge_blueprint
+
     colors = _resolve_theme(theme)
     title = blueprint.get("meta", {}).get("title", "Business Blueprint")
     lib = blueprint.get("library", {})
-    n_systems = len(lib.get("systems", []))
-    n_capabilities = len(lib.get("capabilities", []))
-    n_actors = len(lib.get("actors", []))
-    n_flow_steps = len(lib.get("flowSteps", []))
-    systems_with_caps = sum(1 for s in lib.get("systems", []) if s.get("capabilityIds"))
-    sys_coverage = f"{int(systems_with_caps / n_systems * 100)}%" if n_systems else "N/A"
 
     svg_content = _build_architecture_svg(blueprint, colors, theme)
-    summary_cards = _build_summary_cards(n_systems, n_capabilities, n_actors, n_flow_steps, sys_coverage)
-    description_section = _build_description_section(blueprint)
+
+    if is_knowledge_blueprint(blueprint):
+        summary_cards = _build_knowledge_summary_cards(blueprint)
+        description_section = (
+            _build_description_section(blueprint)
+            + _build_clarify_section(blueprint)
+        )
+    else:
+        n_systems = len(lib.get("systems", []))
+        n_capabilities = len(lib.get("capabilities", []))
+        n_actors = len(lib.get("actors", []))
+        n_flow_steps = len(lib.get("flowSteps", []))
+        systems_with_caps = sum(1 for s in lib.get("systems", []) if s.get("capabilityIds"))
+        sys_coverage = f"{int(systems_with_caps / n_systems * 100)}%" if n_systems else "N/A"
+        summary_cards = _build_summary_cards(
+            n_systems, n_capabilities, n_actors, n_flow_steps, sys_coverage
+        )
+        description_section = _build_description_section(blueprint)
+
     safe_json = json.dumps(json.dumps(blueprint, ensure_ascii=False)).replace("</", "<\\/")
 
     header_bg = "#020617" if theme == "dark" else "#0F2742"

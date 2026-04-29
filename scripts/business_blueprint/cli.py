@@ -35,11 +35,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-auto", help="Alias for --export (free-flow SVG + HTML viewer).")
     parser.add_argument("--html", help="Generate self-contained HTML viewer with inline SVG.")
     parser.add_argument("--validate", help="Validate a blueprint and print JSON results.")
+    parser.add_argument(
+        "--refine",
+        help="Refine an existing blueprint with user feedback. "
+             "Supply --feedback and --output. AI generates a structured diff which is "
+             "applied to produce a new blueprint. Falls back to interactive stdin "
+             "for the LLM call when no API is configured.",
+    )
+    parser.add_argument(
+        "--feedback",
+        help="Natural-language feedback for --refine.",
+    )
+    parser.add_argument(
+        "--no-apply",
+        action="store_true",
+        help="With --refine: write the diff but do not apply it to the blueprint.",
+    )
     parser.add_argument("--from", dest="from_path", help="Source text or file path.")
     parser.add_argument("--output", help="Optional output path for projection generation.")
     parser.add_argument("--format", dest="export_format", default="svg",
                         help="Export format: svg (default: SVG + HTML viewer), drawio, excalidraw, mermaid.")
-    _INDUSTRIES = ["common", "finance", "manufacturing", "retail"]
+    _INDUSTRIES = ["common", "finance", "manufacturing", "retail", "cross-border-ecommerce"]
     parser.add_argument("--industry", default="common", choices=_INDUSTRIES,
                         help=f"Template pack name ({', '.join(_INDUSTRIES)}).")
     parser.add_argument("--theme", default="dark", choices=["light", "dark"],
@@ -148,6 +164,28 @@ def main() -> int:
     if args.validate:
         payload = load_json(Path(args.validate))
         print(json.dumps(validate_blueprint(payload), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.refine:
+        from refine import refine_blueprint, stdout_llm_caller
+        if not args.feedback:
+            print("Error: --refine requires --feedback <text>.", file=sys.stderr)
+            return 1
+        if not args.output:
+            print("Error: --refine requires --output <path>.", file=sys.stderr)
+            return 1
+        diff = refine_blueprint(
+            blueprint_path=Path(args.refine),
+            feedback=args.feedback,
+            output_path=Path(args.output),
+            llm_call=stdout_llm_caller,
+            auto_apply=not args.no_apply,
+        )
+        ops = diff.get("operations", [])
+        rationale = diff.get("rationale", "")
+        print(f"Diff generated: {len(ops)} operations")
+        if rationale:
+            print(f"Rationale: {rationale}")
         return 0
 
     return 0

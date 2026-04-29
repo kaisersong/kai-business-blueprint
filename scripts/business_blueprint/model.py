@@ -57,4 +57,19 @@ def ensure_top_level_shape(payload: dict[str, Any]) -> dict[str, Any]:
     result["library"].setdefault("actors", [])
     result["library"].setdefault("flowSteps", [])
     result["library"].setdefault("systems", [])
+
+    # v2: knowledge block exists only when explicitly populated; we leave it
+    # absent on architecture blueprints so existing exports stay unchanged.
+    if "knowledge" in result["library"]:
+        knowledge = result["library"]["knowledge"]
+        if isinstance(knowledge, dict):
+            for key in (
+                "painPoints",
+                "strategies",
+                "rules",
+                "metrics",
+                "practices",
+                "pitfalls",
+            ):
+                knowledge.setdefault(key, [])
     return result

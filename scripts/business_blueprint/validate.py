@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from knowledge_validate import validate_knowledge_extension
 from model import ensure_top_level_shape
 
 
@@ -25,6 +26,10 @@ def _issue(
 def validate_blueprint(payload: dict[str, Any]) -> dict[str, Any]:
     blueprint = ensure_top_level_shape(payload)
     issues: list[dict[str, Any]] = []
+
+    # v2 knowledge extension validation runs first so missing core fields are
+    # surfaced before downstream architecture-specific checks.
+    issues.extend(validate_knowledge_extension(blueprint))
 
     all_ids: list[str] = []
     for collection in blueprint["library"].values():

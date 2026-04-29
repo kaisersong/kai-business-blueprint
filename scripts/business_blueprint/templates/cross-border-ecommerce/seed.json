@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "meta": {
+    "blueprintType": "domain-knowledge",
+    "detectedIntent": ""
+  },
+  "context": {
+    "goals": [],
+    "scope": [],
+    "assumptions": [],
+    "constraints": [],
+    "sourceRefs": [],
+    "clarifyRequests": [],
+    "clarifications": []
+  },
+  "library": {
+    "capabilities": [],
+    "actors": [],
+    "flowSteps": [],
+    "systems": [],
+    "knowledge": {
+      "painPoints": [],
+      "strategies": [],
+      "rules": [],
+      "metrics": [],
+      "practices": [],
+      "pitfalls": []
+    }
+  },
+  "relations": [],
+  "views": [],
+  "editor": {
+    "fieldLocks": {},
+    "theme": "enterprise-default"
+  },
+  "artifacts": {},
+  "industryHints": {
+    "title": "跨境电商广告投放 know-how",
+    "description": "生成跨境电商广告 know-how 蓝图时，请覆盖以下六类实体：",
+    "checklist": [],
+    "knowledgeHints": {
+      "_status": "depth-validated",
+      "title": "跨境电商广告投放领域 know-how",
+      "checklist": [
+        "痛点：ROAS 波动（欧美市场 2.0-5.0）、素材疲劳（CTR 降 >10%）、平台封号（Facebook 封号率 >5%）、库存积压（周转率 <3）、汇率风险、合规风险",
+        "策略：测款节奏（3 天周期、70% 测款预算）、动态出价、受众分层（LTV 分层）、再营销触发（浏览 >3 次）、预算动态分配、多平台分散",
+        "规则：Facebook 政策红线（虚假折扣封号）、Google Quality Score（>7 才控成本）、TikTok 视频审核要点、Amazon 产品描述真实性",
+        "指标：ROAS（>3.0 欧美电商）、CPA（<$20）、CTR（>1.5%）、LTV（>$50）、转化率（>2%）",
+        "最佳实践：素材 7 天迭代周期、70%/30% 测款放量分配、再营销 20% 预算、单平台预算 <60%",
+        "误区：单平台依赖 >80%（封号风险）、忽视合规（违规率 >15% 封禁）、数据孤岛、盲目放量、忽视 LTV、素材疲劳不更换"
+      ]
+    }
+  }
+}

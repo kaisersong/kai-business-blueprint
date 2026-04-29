@@ -8,7 +8,9 @@ from clarify import build_clarify_requests
 from model import load_json, new_revision_meta, write_json
 
 
-_VALID_INDUSTRIES = frozenset({"common", "finance", "manufacturing", "retail"})
+_VALID_INDUSTRIES = frozenset(
+    {"common", "finance", "manufacturing", "retail", "cross-border-ecommerce"}
+)
 
 
 def load_seed(repo_root: Path, industry: str) -> dict[str, Any]:
@@ -70,14 +72,28 @@ def create_blueprint_from_text(
     industry: str,
     repo_root: Path,
 ) -> dict[str, Any]:
-    blueprint = deepcopy(load_seed(repo_root, industry))
+    seed = deepcopy(load_seed(repo_root, industry))
+    # Preserve seed-supplied blueprintType (e.g. cross-border-ecommerce defaults
+    # to domain-knowledge). Anything else falls back to architecture.
+    seed_meta = seed.get("meta") or {}
+    seed_blueprint_type = seed_meta.get("blueprintType", "architecture")
+    blueprint = seed
     # Remove hints from output (they're for AI, not for the blueprint)
     blueprint.pop("industryHints", None)
     blueprint["meta"] = {
         "title": "Generated Blueprint",
         "industry": industry,
+        "blueprintType": seed_blueprint_type,
         **new_revision_meta(parent_revision_id=None, modified_by="ai"),
     }
+    if seed_blueprint_type == "domain-knowledge":
+        # detectedIntent is required for domain-knowledge blueprints.
+        # The skill caller / AI is expected to overwrite this with a real
+        # one-sentence intent summary; we seed a placeholder derived from input.
+        blueprint["meta"]["detectedIntent"] = (
+            (source_text or "").strip().splitlines()[0][:80]
+            or "domain-knowledge blueprint"
+        )
     blueprint["context"]["sourceRefs"] = [{"type": "inline-text", "excerpt": source_text}]
 
     blueprint["views"] = _build_views(blueprint)
