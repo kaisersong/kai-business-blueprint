@@ -88,8 +88,21 @@ cd kai-business-blueprint && pip install -e .
 | `--export <blueprint.json>` | 导出 SVG、draw.io、Excalidraw、Mermaid 图表 |
 | `--export-auto <blueprint.json>` | 使用内容路由 + 自由流式布局导出 SVG |
 | `--validate <blueprint.json>` | 验证蓝图结构，输出错误/警告 |
+| `--refine <blueprint.json>` | 基于自然语言反馈优化已有蓝图，配合 `--feedback "..."`。LLM 输出结构化 diff，自动应用产生新版本 |
 | `--from <文件>` | 从指定文件读取源材料 |
-| `--industry <包名>` | 指定行业模板包（默认：`common`） |
+| `--industry <包名>` | 指定行业模板包（`common`、`finance`、`manufacturing`、`retail`、**`cross-border-ecommerce`**） |
+
+### Domain-Knowledge 蓝图（v0.14 新增）
+
+除了原有的架构视角蓝图（capabilities / actors / flowSteps / systems），skill 新增 **domain-knowledge 蓝图**用于客户 know-how pitch：痛点、策略、规则、指标、最佳实践、常见误区六类实体，通过 `solves` / `measures` / `enforces` / `requires` / `prevents` / `causes` 等关系串联。
+
+通过 `meta.blueprintType: "domain-knowledge"` 选定（用 `cross-border-ecommerce` 这类 know-how 行业模板时自动设定，或由 AI 意图抽取得出）。pipeline 内置三个质量驱动机制：
+
+- **澄清回合**：domain-knowledge 蓝图必须包含 ≥3 条 `clarifyRequests`，每条都要指向具体实体；validator 在第一轮强制 AI 暴露不确定点。
+- **实体自检**：每个 knowledge 实体可附 `_selfCheck` 字段（`passed` / `questions` 数组），`questions` 非空的实体在 SVG 中渲染为琥珀色边框 + `?` 标记，让 reviewer 一眼看出哪些点还需要确认。
+- **修订命令**：`--refine blueprint.json --feedback "..."` 让 LLM 输出 `add` / `modify` / `delete` diff，应用后产生新版本。diff 结构类似 JSON Patch，可在应用前按操作筛选。
+
+知识图渲染采用三段式布局：顶部规则 band、中部「痛点 → 策略 → 指标」三联画（按 `solves` / `measures` 关系行对齐，让主线接近水平）、底部「最佳实践 + 常见误区」胶囊。跨区域连接使用三阶贝塞尔曲线；关系按三档透明度分级，确保 30+ 关系密度下主线（solves / measures）依然清晰可读。
 
 ### 导出质量契约
 
@@ -268,6 +281,10 @@ for rel in bp["relations"]:
 ---
 
 ## 版本日志
+
+**v0.14.0** — Domain-knowledge 蓝图：在原有架构蓝图（capabilities / actors / flowSteps / systems）之外，新增 know-how pitch 蓝图类型——痛点、策略、规则、指标、最佳实践、常见误区六类实体。pipeline 内置三大质量机制：**澄清回合**（validator 强制 ≥3 条指向具体实体的 clarifyRequests）、**实体自检**（每个实体可声明自身不确定项，渲染为琥珀色 `?` 标记）、**`--refine` 命令**（LLM 输出结构化 diff 自动应用产生新版本）。新增 `cross-border-ecommerce` 行业模板（深度验证），retail / finance / manufacturing 模板补充 `knowledgeHints`（标记 `template-only-not-domain-validated`，AI 使用时必须向用户披露此限制）。知识图渲染采用三段式布局（规则 band / 痛点-策略-指标三联画 / 实践-误区胶囊），按 `solves` / `measures` 行对齐，跨区使用三阶贝塞尔曲线，关系分三档透明度避免视觉过载。Free-flow 渲染器同步切换为贝塞尔曲线。新增 67 条单元测试（共 85 条），锁定 v2 行为。
+
+**v0.13.0** — 意图解析与标签遮挡修复：将 `IntentResolver` + `RuleEngine` 集成到 SVG 导出 pipeline，使 layer 分配数据驱动；修复自由流式布局下标签与节点的视觉遮挡。
 
 **v0.10.0** — 质量加固发布：新增显式导出路由决策与 SVG 完整性检查，并在 fallback 失败时返回结构化 diagnostics；补齐 `evals/` 下的 machine-readable 评测资产（阈值、缺陷分类、路由 fixture、评分 schema）；增强 CLI 对带空格路径、CRLF 输入和 UTF-8 校验输出的跨平台兼容；将共享导出文本/主题 helper 从 `export_svg.py` 中拆出；并修正演进时间线在暗黑主题下的卡片底色与多胶囊换行溢出问题。
 

@@ -89,10 +89,23 @@ cd kai-business-blueprint && pip install -e .
 | `--export-auto <blueprint.json>` | Alias for --export (free-flow SVG + HTML viewer) |
 | `--html <output.html>` | Generate self-contained HTML viewer with inline SVG |
 | `--validate <blueprint.json>` | Validate blueprint structure, output errors/warnings |
+| `--refine <blueprint.json>` | Refine an existing blueprint with `--feedback "..."` (LLM produces a structured diff that is applied to a new blueprint) |
 | `--from <file>` | Read source material from file path |
-| `--industry <pack>` | Apply industry template pack (common, finance, manufacturing, retail) |
+| `--industry <pack>` | Apply industry template pack (common, finance, manufacturing, retail, **cross-border-ecommerce**) |
 | `--theme <dark|light>` | Color theme for output (default: dark) |
 | `--format <fmt>` | Export format: svg, drawio, excalidraw, mermaid, all |
+
+### Domain-Knowledge Blueprints (v0.14)
+
+Beyond the architecture-style blueprint (capabilities / actors / flowSteps / systems), the skill now produces **domain-knowledge blueprints** for know-how pitches: pain points, strategies, rules, metrics, practices, pitfalls — six entity types tied together by `solves` / `measures` / `enforces` / `requires` / `prevents` / `causes` relations.
+
+A domain-knowledge blueprint is selected by `meta.blueprintType: "domain-knowledge"` (set automatically when you choose a know-how-leaning industry such as `cross-border-ecommerce`, or by AI intent extraction). Three quality-driven mechanisms live in the pipeline:
+
+- **Clarification turn.** Validator rejects a domain-knowledge blueprint with fewer than 3 `clarifyRequests`, each pointing to a specific entity. The AI must surface what it is uncertain about before producing the chart.
+- **Per-entity self-check.** Every knowledge entity carries an optional `_selfCheck` field with `passed` / `questions` arrays. Entities with non-empty `questions` are rendered with a soft amber accent and a `?` glyph so reviewers can spot what still needs verification.
+- **Refine command.** `--refine blueprint.json --feedback "..."` asks the LLM to emit an `add` / `modify` / `delete` diff which is then applied to produce a new revision. The diff structure is JSON-Patch-like and can be filtered per-operation before applying.
+
+The knowledge SVG renderer uses a three-band layout: rules across the top, a `pain → strategy → metric` triptych in the middle (rows aligned by `solves` / `measures` so the dominant lines stay near-horizontal), and `practices` + `pitfalls` capsules at the bottom. Cross-zone connections are cubic Bezier; relations are drawn at three opacity tiers so the primary `solves` / `measures` story stays readable even with 30+ relations.
 
 ### Export Quality Contracts
 
@@ -270,6 +283,10 @@ for rel in bp["relations"]:
 ---
 
 ## Version History
+
+**v0.14.0** — Domain-knowledge blueprints: add a second blueprint type for know-how pitches (pain points / strategies / rules / metrics / practices / pitfalls) on top of the existing architecture mode. Three quality-driven mechanisms — clarification turn (validator requires ≥3 entity-targeted clarifyRequests), per-entity self-check (entities surface their own uncertainty as a `?` glyph), and `--refine` command (LLM emits a structured diff that is applied to produce a new revision). New `cross-border-ecommerce` industry pack with depth-validated knowledgeHints; existing retail/finance/manufacturing packs gain `knowledgeHints` blocks marked `template-only-not-domain-validated` so AI must disclose the limitation. Knowledge SVG renderer uses a three-band layout (rules / pain-strategy-metric triptych / practices-pitfalls capsules) with row alignment by `solves` / `measures`, cubic Bezier connections, and three-tier opacity so the dominant story stays readable on dense graphs. Free-flow renderer also switches simple connections from straight lines to Bezier. 85 unit tests (67 new) lock the v2 behaviour.
+
+**v0.13.0** — Intent resolution & label overlap fix: integrate `IntentResolver` + `RuleEngine` into the SVG export pipeline so layer assignment becomes data-driven; resolve label-node overlap on free-flow output.
 
 **v0.10.0** — Quality hardening release: add explicit export route resolution and SVG integrity checks with structured fallback diagnostics; introduce machine-readable eval assets under `evals/` (thresholds, defect taxonomy, route fixtures, scoring schema); improve cross-platform CLI handling for spaced paths, CRLF input, and UTF-8 validation output; split shared export text/theme helpers out of `export_svg.py`; and refine the evolution timeline view so dark cards stay readable and wrapped system pills no longer overflow.
 
