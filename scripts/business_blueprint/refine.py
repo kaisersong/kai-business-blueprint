@@ -64,6 +64,22 @@ CONSTRAINTS:
   - Use ``library.knowledge.pitfalls[2]`` (with index) to DELETE the third pitfall.
 - Output ONLY the JSON diff, no commentary, no markdown fencing other than the
   triple-backtick block above (the parser handles either).
+
+DOMAIN-KNOWLEDGE NAMING (apply ONLY when meta.blueprintType == "domain-knowledge"):
+- ``strategy.name``: 4-10 字产品级名词短语（"统一归因模型"、"AIGC 素材工厂"、
+  "智能调价机器人"）。不要写成动作（"优化素材"、"调价"），不要写成维度
+  （"测款节奏"、"受众分层"）。如果只能想到动作或维度，把它包装成方案名
+  （"7×24 智能竞价机器人" 而非 "动态出价"）。
+- ``painPoint.audience``: 自由字符串字段，主要受影响的 persona
+  （"品牌方/DTC"、"平台卖家"、"代运营/服务商"）。多个时用逗号分隔。
+  不需要建立独立 persona 实体——audience 仅作为分组标签。
+- ``strategy.audience``: 同上，标注主要受益 persona。
+- ``metric.forecast`` (可选): 形如 ``{{"direction": "up"|"down"|"neutral",
+  "magnitude": <数字>, "unit": "%"|"倍"}}``，用于对客户可承诺的提升收益。
+  现状基准仍用 ``value`` / ``benchmarkContext``。两者并存表达
+  "现状 X，可达 Y"。
+- 这些字段是 v2 minimal-validation 政策下的 pass-through 字段——validator
+  不强制，但渲染器和 pitch 流程会消费它们。
 """
 
 

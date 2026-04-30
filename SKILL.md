@@ -47,6 +47,24 @@ Using the user's source material AND the industry hints checklist, extract:
   - See `references/systems-schema.md` for systems category/layer rules
   - See `scripts/business_blueprint/templates/common/seed.json` for field examples
 
+**Domain-knowledge mode** (when seed has `meta.blueprintType: "domain-knowledge"`,
+e.g. `cross-border-ecommerce`): entities go into `library.knowledge.*`
+(painPoints / strategies / rules / metrics / practices / pitfalls), not the
+architecture buckets above. The seed's `industryHints.knowledgeHints.namingHints`
+section, when present, dictates content granularity:
+- `strategy.name` must be a 4-10 字 product-grade noun phrase
+  (e.g. "统一归因模型", "AIGC 素材工厂"), not an action ("优化素材") or a
+  dimension ("测款节奏"). Reference the seed's `strategy_named_examples`.
+- `painPoint.audience` and `strategy.audience` are free-string fields tagging
+  the primary persona ("品牌方/DTC", "平台卖家", "代运营/服务商"). Multiple
+  values comma-separated. No standalone persona entity is required.
+- `metric.forecast: {direction, magnitude, unit}` is optional and used for
+  commitments to the customer ("ROAS 提升 25%"). Keep `value`/`benchmarkContext`
+  for current baseline; the two coexist as "now X, can reach Y".
+
+These fields are pass-through under v2 minimal-validation: the validator does
+not enforce them, but renderers and pitch flows consume them.
+
 ### Step 3: Write the blueprint JSON
 
 Write the JSON file directly to the output path. Use this schema:
