@@ -25,6 +25,8 @@ def test_template_validation_matrix_exports_one_medium_blueprint_per_template(
 
     for entry in payload["entries"]:
         assert entry["complexity"] == "medium"
+        assert entry["templateId"] == entry["industry"]
+        assert entry["templateName"] == DEFAULT_TEMPLATE_PROFILES[entry["industry"]]["templateName"]
         assert entry["validation"]["errorCount"] == 0
         assert entry["validation"]["capabilityCount"] >= 4 or entry["blueprintType"] == "domain-knowledge"
         assert entry["validation"]["relationCount"] >= 6
@@ -39,6 +41,14 @@ def test_template_validation_matrix_exports_one_medium_blueprint_per_template(
 
         blueprint = json.loads(blueprint_path.read_text(encoding="utf-8"))
         assert blueprint["meta"]["industry"] == entry["industry"]
+        assert blueprint["meta"]["templateId"] == entry["industry"]
+        assert blueprint["meta"]["templateName"] == entry["templateName"]
+
+        html = html_path.read_text(encoding="utf-8")
+        assert "Schema v1.0" in html
+        assert f"Template: {entry['templateName']}" in html
+        assert "Skill v" not in html
+        assert "Business Blueprint v" not in html
 
         svg = svg_path.read_text(encoding="utf-8")
         assert f"visual-profile: {entry['visualProfile']}" in svg

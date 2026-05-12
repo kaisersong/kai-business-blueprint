@@ -27,6 +27,8 @@ def test_plan_creates_skeleton_with_source(tmp_path: Path) -> None:
     assert result.returncode == 0
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["meta"]["industry"] == "retail"
+    assert payload["meta"]["templateId"] == "retail"
+    assert payload["meta"]["templateName"] == "零售行业模板"
     assert "零售客户" in payload["context"]["sourceRefs"][0]["excerpt"]
     # Skeleton only — AI agent fills entities
     assert isinstance(payload["library"]["capabilities"], list)

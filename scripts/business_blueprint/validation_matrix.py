@@ -12,6 +12,7 @@ try:
     from .export_routes import resolve_export_route
     from .export_svg import export_svg_auto
     from .render_png import render_svg_to_png
+    from .template_catalog import TEMPLATE_NAMES
     from .validate import validate_blueprint
 except ImportError:
     from export_html import export_html_viewer
@@ -19,15 +20,16 @@ except ImportError:
     from export_routes import resolve_export_route
     from export_svg import export_svg_auto
     from render_png import render_svg_to_png
+    from template_catalog import TEMPLATE_NAMES
     from validate import validate_blueprint
 
 
 DEFAULT_TEMPLATE_PROFILES: dict[str, dict[str, str]] = {
-    "common": {"visualProfile": "dark-ops", "theme": "dark"},
-    "retail": {"visualProfile": "warm-consulting", "theme": "light"},
-    "finance": {"visualProfile": "executive-clean", "theme": "light"},
-    "manufacturing": {"visualProfile": "blueprint-technical", "theme": "dark"},
-    "cross-border-ecommerce": {"visualProfile": "knowledge-canvas", "theme": "light"},
+    "common": {"visualProfile": "dark-ops", "theme": "dark", "templateName": TEMPLATE_NAMES["common"]},
+    "retail": {"visualProfile": "warm-consulting", "theme": "light", "templateName": TEMPLATE_NAMES["retail"]},
+    "finance": {"visualProfile": "executive-clean", "theme": "light", "templateName": TEMPLATE_NAMES["finance"]},
+    "manufacturing": {"visualProfile": "blueprint-technical", "theme": "dark", "templateName": TEMPLATE_NAMES["manufacturing"]},
+    "cross-border-ecommerce": {"visualProfile": "knowledge-canvas", "theme": "light", "templateName": TEMPLATE_NAMES["cross-border-ecommerce"]},
 }
 
 
@@ -83,6 +85,8 @@ def build_template_validation_matrix(
         entries.append(
             {
                 "industry": industry,
+                "templateId": industry,
+                "templateName": config["templateName"],
                 "blueprintType": blueprint_type,
                 "complexity": "medium",
                 "visualProfile": visual_profile,
@@ -304,6 +308,8 @@ def _architecture_blueprint(
         "meta": {
             "title": title,
             "industry": industry,
+            "templateId": industry,
+            "templateName": DEFAULT_TEMPLATE_PROFILES[industry]["templateName"],
             "blueprintType": "architecture",
             "revisionId": "rev-validation-001",
             "lastModifiedBy": "ai",
@@ -342,6 +348,8 @@ def _cross_border_knowledge_blueprint() -> dict[str, Any]:
         "meta": {
             "title": "跨境电商广告增长 know-how 蓝图",
             "industry": "cross-border-ecommerce",
+            "templateId": "cross-border-ecommerce",
+            "templateName": DEFAULT_TEMPLATE_PROFILES["cross-border-ecommerce"]["templateName"],
             "blueprintType": "domain-knowledge",
             "detectedIntent": "梳理跨境电商广告投放从痛点、策略、规则到指标的可执行增长方法。",
             "revisionId": "rev-validation-001",

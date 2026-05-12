@@ -12,8 +12,10 @@ from xml.sax.saxutils import escape
 
 try:
     from .export_svg import FONT, FONT_MONO, _resolve_theme
+    from .template_catalog import blueprint_template_name
 except ImportError:
     from export_svg import FONT, FONT_MONO, _resolve_theme
+    from template_catalog import blueprint_template_name
 
 
 _TEMPLATE_PATH = Path(__file__).parent / "templates" / "html-viewer.html"
@@ -41,6 +43,13 @@ _SKILL_VERSION = _get_skill_version()
 
 def _esc(s: str) -> str:
     return escape(str(s))
+
+
+def _viewer_meta_text(blueprint: dict[str, Any]) -> str:
+    meta = blueprint.get("meta", {}) or {}
+    schema_version = str(blueprint.get("version") or meta.get("schemaVersion") or "unknown")
+    template_name = blueprint_template_name(meta)
+    return f"Schema v{schema_version} · Template: {template_name}"
 
 
 def _build_architecture_svg(
@@ -234,7 +243,9 @@ def export_html_viewer(
         visual_profile=visual_profile,
         blueprint_type=blueprint_type,
     )
-    title = blueprint.get("meta", {}).get("title", "Business Blueprint")
+    meta = blueprint.get("meta", {}) or {}
+    title = meta.get("title", "Business Blueprint")
+    viewer_meta = _viewer_meta_text(blueprint)
     lib = blueprint.get("library", {})
 
     svg_content = _build_architecture_svg(blueprint, colors, theme, visual_profile=visual_profile)
@@ -303,6 +314,7 @@ def export_html_viewer(
     html = html.replace("{{CARD_BORDER}}", colors["border"])
     html = html.replace("{{DARK_EXTRAS}}", dark_extras)
     html = html.replace("{{GRID_BG}}", grid_bg)
+    html = html.replace("{{VIEWER_META}}", _esc(viewer_meta))
     html = html.replace("{{VERSION}}", _SKILL_VERSION)
     html = html.replace("{{SVG_CONTENT}}", svg_content)
     html = html.replace("{{SUMMARY_CARDS}}", summary_cards)

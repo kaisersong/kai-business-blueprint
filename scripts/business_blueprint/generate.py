@@ -7,6 +7,11 @@ from typing import Any
 from clarify import build_clarify_requests
 from model import load_json, new_revision_meta, write_json
 
+try:
+    from .template_catalog import TEMPLATE_NAMES
+except ImportError:
+    from template_catalog import TEMPLATE_NAMES
+
 
 _VALID_INDUSTRIES = frozenset(
     {"common", "finance", "manufacturing", "retail", "cross-border-ecommerce"}
@@ -83,6 +88,8 @@ def create_blueprint_from_text(
     blueprint["meta"] = {
         "title": "Generated Blueprint",
         "industry": industry,
+        "templateId": industry,
+        "templateName": TEMPLATE_NAMES.get(industry, industry),
         "blueprintType": seed_blueprint_type,
         **new_revision_meta(parent_revision_id=None, modified_by="ai"),
     }

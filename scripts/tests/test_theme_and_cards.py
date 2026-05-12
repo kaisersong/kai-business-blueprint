@@ -174,6 +174,33 @@ class TestHtmlThemePropagation:
         assert 'background-size' in content
         assert '40px' in content
 
+    def test_html_header_separates_schema_skill_and_template_metadata(self, tmp_path: Path) -> None:
+        target = tmp_path / "metadata.html"
+        bp = {
+            **MINIMAL_BP,
+            "version": "1.0",
+            "meta": {
+                **MINIMAL_BP["meta"],
+                "templateName": "零售门店履约模板",
+            },
+        }
+
+        export_html_viewer(bp, target, theme="light")
+
+        content = target.read_text(encoding="utf-8")
+        assert "Schema v1.0" in content
+        assert "Template: 零售门店履约模板" in content
+        assert "Skill v" not in content
+        assert "Business Blueprint v" not in content
+
+    def test_html_header_derives_template_name_from_industry_when_missing(self, tmp_path: Path) -> None:
+        target = tmp_path / "derived-template.html"
+
+        export_html_viewer(MINIMAL_BP, target, theme="light")
+
+        content = target.read_text(encoding="utf-8")
+        assert "Template: 零售行业模板" in content
+
     def test_html_viewer_defaults_to_freeflow_when_no_standard_template(self, tmp_path: Path) -> None:
         target = tmp_path / "freeflow.html"
         export_html_viewer(MINIMAL_BP, target)
